@@ -6,11 +6,12 @@
     },
     "python.terminal.activateEnvironment": false,
     "micropico.openOnStart": true,
+    "micropico.autoConnect": true,
+    "micropico.syncFolder": "src",
     "python.analysis.typeshedPaths": [
         "~/.micropico-stubs/included"
     ],
     "python.analysis.extraPaths": [
         "~/.micropico-stubs/included"
-    ],
-    "micropico.autoConnect": false
+    ]
 }
