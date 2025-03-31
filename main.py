@@ -10,55 +10,74 @@ from time import sleep, ticks_ms
 
 USER_BUTTON = Button(servo2040.USER_SW)
 
-UPDATES_PER_SEC = 30
-WALK_CYCLE_TIME = 2000
+UPDATES_PER_SEC = 40
+WALK_CYCLE_TIME = 3000
 
 leg_dimensions = { 'coxa_len': 40, 'femur_len': 65, 'tibia_len': 90 }
 
 
-leg1 = Leg(ServoConfig(servo2040.SERVO_7, 80, -80, 0), 
-           ServoConfig(servo2040.SERVO_8, -90, 90, -20, True), 
-           ServoConfig(servo2040.SERVO_9, 70, -70, 85, False),
-           leg_rotation_offset=-60,
-           leg_translation_offset=Coord3D(25, 25, 0),
-           **leg_dimensions)
+leg_rf = Leg(ServoConfig(servo2040.SERVO_1, -30, 60, 4), 
+             ServoConfig(servo2040.SERVO_2, -90, 40, -30, True), 
+             ServoConfig(servo2040.SERVO_3, 90, -80, 105),
+             leg_rotation_offset=-60,
+             leg_translation_offset=Coord3D(45, 45, 0),
+             **leg_dimensions)
 
-leg2 = Leg(ServoConfig(servo2040.SERVO_4, 80, -80, 0), 
-           ServoConfig(servo2040.SERVO_5, -90, 90, -20, True), 
-           ServoConfig(servo2040.SERVO_6, 70, -70, 85, False), 
-           **leg_dimensions)
+leg_rc = Leg(ServoConfig(servo2040.SERVO_4, 80, -80, 0, True), 
+             ServoConfig(servo2040.SERVO_5, -90, 90, -20, True), 
+             ServoConfig(servo2040.SERVO_6, 70, -70, 85, False), 
+             **leg_dimensions)
 
-leg3 = Leg(ServoConfig(servo2040.SERVO_1, 80, -80, 0), 
+leg_rb = Leg(ServoConfig(servo2040.SERVO_7, 80, -80, 0), 
+             ServoConfig(servo2040.SERVO_8, -90, 90, -20, True), 
+             ServoConfig(servo2040.SERVO_9, 70, -70, 85, False),
+             leg_rotation_offset=60,
+             leg_translation_offset=Coord3D(45, -45, 0),
+             **leg_dimensions)
+
+leg_lf = Leg(ServoConfig(servo2040.SERVO_7, 80, -80, 0), 
+             ServoConfig(servo2040.SERVO_8, -90, 90, -20, True), 
+             ServoConfig(servo2040.SERVO_9, 70, -70, 85, False),
+             leg_rotation_offset=-60,
+             leg_translation_offset=Coord3D(45, 45, 0),
+             **leg_dimensions)
+
+leg_lc = Leg(ServoConfig(servo2040.SERVO_4, 80, -80, 0), 
+             ServoConfig(servo2040.SERVO_5, -90, 90, -20, True), 
+             ServoConfig(servo2040.SERVO_6, 70, -70, 85, False), 
+             **leg_dimensions)
+
+leg_lb = Leg(ServoConfig(servo2040.SERVO_1, 80, -80, 0), 
            ServoConfig(servo2040.SERVO_2, -90, 90, -20, True), 
            ServoConfig(servo2040.SERVO_3, 70, -70, 85, False),
            leg_rotation_offset=60,
-           leg_translation_offset=Coord3D(25, -25, 0),
+           leg_translation_offset=Coord3D(45, -45, 0),
            **leg_dimensions)
 
 start_time = ticks_ms()
 
 walk_cycle_points = [
-    Coord3D(100, 20, -60),
-    Coord3D(100, -20, -60),
-    Coord3D(100, 0, 25)
+    Coord3D(100, 30, -100),
+    Coord3D(100, -30, -100),
+    Coord3D(100, 0, 0)
 ]
 
-
 def reset():
-    leg1.zero_servos()  # Example, set to a neutral position
-    leg2.zero_servos()
-    leg3.zero_servos()
+    # leg_rf.zero_servos()  # Example, set to a neutral position
+    # leg_rc.zero_servos()
+    # leg_rb.zero_servos()
     sleep(1)
-    leg1.zero_servos()  # Example, set to a neutral position
-    leg2.zero_servos()
-    leg3.zero_servos()
+    # leg_rf.zero_servos()  # Example, set to a neutral position
+    # leg_rc.zero_servos()
+    # leg_rb.zero_servos()
+    print('servos zeroed')
     
 sleep(1)
 try:
     while not USER_BUTTON.raw():
-        # leg1.zero_servos()
-        # leg2.zero_servos()
-        # leg3.zero_servos()
+        # leg_rf.zero_servos()
+        # leg_rc.zero_servos()
+        # leg_rb.zero_servos()
 
         ticks = ticks_ms()
         elapsed = (ticks - start_time) % WALK_CYCLE_TIME
@@ -67,13 +86,15 @@ try:
         point = walk_cycle(cycle_t, *walk_cycle_points)
         point_offset = walk_cycle((cycle_t + 0.5) % 1, *walk_cycle_points)
 
-        leg1.set_position(point)
-        leg2.set_position(point_offset)
-        leg3.set_position(point)
+        print(leg_rf.set_position(point))
+        # leg_rc.set_position(point_offset)
+        # leg_rb.set_position(point)
         
+        # sleep(100)
         sleep(1 / UPDATES_PER_SEC)
-except KeyboardInterrupt:
     reset()
-    print("Program interrupted. Servos stopped.")
 
-reset()
+except KeyboardInterrupt:
+    print("Program interrupted.")
+    reset()
+

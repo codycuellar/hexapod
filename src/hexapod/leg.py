@@ -3,6 +3,14 @@ import math
 from servo import Servo
 
 class ServoConfig:
+    """
+    Configuration for a servo motor, including pin number, limits, and zeroed angle.
+    param pin_number: Pin number for the servo motor.
+    param upper_limit: Upper limit for the servo motor angle.
+    param lower_limit: Lower limit for the servo motor angle.
+    param zeroed_angle: Angle at which the servo motor is considered zeroed.
+    param inverted: Boolean indicating if the servo motor is inverted.
+    """
     def __init__(self, pin_number, upper_limit, lower_limit, zeroed_angle, inverted = False):
         self.pin_number = pin_number
         self.upper_limit = upper_limit
@@ -47,7 +55,7 @@ class Leg:
         self.leg_translation_offset = leg_translation_offset
 
     def set_position(self, position: Coord3D):
-        pos = Coord3D(position.x, position.y, position.z)
+        pos = Coord3D(position.x, position.y, position.z) # make a copy
         angles = self._calculate_ik(pos)
         angles = self._normalize_relative_angles(*angles)
         return self._set_servo_angles(*angles)
@@ -69,18 +77,17 @@ class Leg:
         """
 
         # Apply rotation around the z-axis (yaw)
-        print('position before offset:', position.as_list())
         x = position.x
         y = position.y
         theta = math.radians(self.leg_rotation_offset)
         position.x = x * math.cos(theta) - y * math.sin(theta)
         position.y = x * math.sin(theta) + y * math.cos(theta)
-        print('position after offset:', position.as_list())
+
         if self.leg_translation_offset:
             position.x += self.leg_translation_offset.x
             position.y += self.leg_translation_offset.y
             position.z += self.leg_translation_offset.z
-        print('position after translation:', position.as_list())
+            print(position.as_list())
 
     def _calculate_ik(self, position: Coord3D):
         """
