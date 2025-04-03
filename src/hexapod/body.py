@@ -58,27 +58,27 @@ class Body:
     def _build_shimmy_cycle(self):
         self._leg_shimmy_handles = {
             'rf': (
-                self._shimmy_cycle_handles[0].translate(Coord3D(45, 45, 0)).rotate(-self.hip_rotation, 'z'), 
-                self._shimmy_cycle_handles[1].translate(Coord3D(45, 45, 0)).rotate(-self.hip_rotation, 'z')
+                self._shimmy_cycle_handles[0].translate(Coord3D(20, 45, 0)).rotate(-self.hip_rotation, 'z'), 
+                self._shimmy_cycle_handles[1].translate(Coord3D(20, 45, 0)).rotate(-self.hip_rotation, 'z')
             ),
             'rc': (
                 self._shimmy_cycle_handles[0], 
                 self._shimmy_cycle_handles[1]
             ),
             'rb': (
-                self._shimmy_cycle_handles[0].translate(Coord3D(45, -45, 0)).rotate(self.hip_rotation, 'z'),
-                self._shimmy_cycle_handles[1].translate(Coord3D(45, -45, 0)).rotate(self.hip_rotation, 'z')
+                self._shimmy_cycle_handles[0].translate(Coord3D(20, -45, 0)).rotate(self.hip_rotation, 'z'),
+                self._shimmy_cycle_handles[1].translate(Coord3D(20, -45, 0)).rotate(self.hip_rotation, 'z')
             ),
             'lf': (
-                self._shimmy_cycle_handles[1].translate(Coord3D(45, -45, 0)).rotate(self.hip_rotation, 'z'),
-                self._shimmy_cycle_handles[0].translate(Coord3D(45, -45, 0)).rotate(self.hip_rotation, 'z')            ),
+                self._shimmy_cycle_handles[1].translate(Coord3D(20, -45, 0)).rotate(self.hip_rotation, 'z'),
+                self._shimmy_cycle_handles[0].translate(Coord3D(20, -45, 0)).rotate(self.hip_rotation, 'z')            ),
             'lc': (
                 self._shimmy_cycle_handles[1], 
                 self._shimmy_cycle_handles[0]
             ),
             'lb': (
-                self._shimmy_cycle_handles[1].translate(Coord3D(45, 45, 0)).rotate(-self.hip_rotation, 'z'),
-                self._shimmy_cycle_handles[0].translate(Coord3D(45, 45, 0)).rotate(-self.hip_rotation, 'z')
+                self._shimmy_cycle_handles[1].translate(Coord3D(20, 45, 0)).rotate(-self.hip_rotation, 'z'),
+                self._shimmy_cycle_handles[0].translate(Coord3D(20, 45, 0)).rotate(-self.hip_rotation, 'z')
             ),
         }
 

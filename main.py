@@ -9,7 +9,7 @@ from time import sleep, ticks_ms
 USER_BUTTON = Button(servo2040.USER_SW)
 
 UPDATES_PER_SEC = 40
-WALK_CYCLE_TIME = 3000
+WALK_CYCLE_TIME = 1500
 
 leg_dimensions = { 'coxa_len': 40, 'femur_len': 65, 'tibia_len': 90 }
 
