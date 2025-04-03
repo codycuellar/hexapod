@@ -6,16 +6,25 @@ class Coord3D:
         self.y = y
         self.z = z
 
+    def __str__(self):
+        return "Coord3D({:.1f}, {:.1f}, {:.1f})".format(self.x, self.y, self.z)
+    
+    def __repr__(self):
+        return self.__str__()
+
+    def copy(self):
+        return Coord3D(self.x, self.y, self.z)
+
     def as_list(self):
         return [self.x, self.y, self.z]
     
     def mirror(self, axis):
-        if axis == 'x':
-            return Coord3D(-self.x, self.y, self.z)
-        elif axis == 'y':
-            return Coord3D(self.x, -self.y, self.z)
-        elif axis == 'z':
+        if axis == 'xy':
             return Coord3D(self.x, self.y, -self.z)
+        elif axis == 'yz':
+            return Coord3D(-self.x, self.y, self.z)
+        elif axis == 'xz':
+            return Coord3D(self.x, -self.y, self.z)
         else:
             raise ValueError("Invalid axis. Use 'x', 'y', or 'z'.")
     
@@ -46,6 +55,9 @@ class Coord2D:
     def __init__(self, x: float, y: float):
         self.x = x
         self.y = y
+
+    def __str__(self):
+        return "Coord2D({:.1f}, {:.1f})".format(self.x, self.y)
 
     def as_list(self):
         return [self.x, self.y]
