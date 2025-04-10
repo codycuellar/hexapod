@@ -1,4 +1,4 @@
-from hexapod.utils import Coord3D
+from hexapod.utils import Coord3D, Transform3D
 import math
 from servo import Servo as RawServo
 from servo import ServoCluster
@@ -6,12 +6,14 @@ from servo import ServoCluster
 class Servo:
     def __init__(self, name:str, cluster:ServoCluster, pin_number:int, upper_limit:int, lower_limit:int, zeroed_angle:int, inverted = False):
         """
-        Configuration for a servo motor, including pin number, limits, and zeroed angle.
-        param pin_number: Pin number for the servo motor.
+        Configuration for a servo motor.
+        param name: The servo name for logging purposes.
+        param cluster: The servo cluster class to which the servo motor belongs.
+        param pin_number: GPIO Pin number for the servo motor to request servo updates from the cluster.
         param upper_limit: Upper limit for the servo motor angle.
         param lower_limit: Lower limit for the servo motor angle.
-        param zeroed_angle: Angle at which the servo motor is considered zeroed.
-        param inverted: Boolean indicating if the servo motor is inverted.
+        param zeroed_angle: Physical angle of the kinematics refernce frame when the servo is at 0 degrees.
+        param inverted: Boolean indicating if the servo degrees are inverted from the specified upper and lower limits.
         """
         self.name = name
         self.pin_number = pin_number
@@ -68,7 +70,8 @@ class Leg:
     translation_offsets = { "x": 0, "y": 0, "z": 0 }
     enabled = True
 
-    def __init__(self, name: str, coxa: Servo, femur: Servo, tibia: Servo, 
+    # TODO: set the translation ffrom the body center
+    def __init__(self, name: str, coxa: Servo, femur: Servo, tibia: Servo, mount_offset: Transform3D,
                  coxa_len=50, femur_len=50, tibia_len=50):
         """
         Initialize the leg with servo pin numbers for each joint (coxa, femur, tibia). Offsets
@@ -76,6 +79,10 @@ class Leg:
         the servo is zeroed out on a scale of -90 to 90.
         """
         self.name = name
+
+        self.mount_offset = mount_offset.invert()
+        self.pos_from_global = self.mount_offset
+
         self.coxa = coxa
         self.femur = femur
         self.tibia = tibia
@@ -84,9 +91,24 @@ class Leg:
         self.femur_len = femur_len
         self.tib_len = tibia_len
 
+    def set_global_position(self, transform: Transform3D):
+        """
+        If the attachment point of the leg is moving about in global space,
+        it can be updated here by providing the transformation of the body.
+        """
+        self.pos_from_global = self.mount_offset.dot(transform.invert())
+
     def set_position(self, position: Coord3D):
+        """
+        Set a position for the leg tip in global space. The leg will compute the relative
+        position using the pos_from_global which is updated by the controlling body.
+        """
         if self.enabled == False:
             return
+        
+        # Get the gloobal coordinate relative to the leg's current position
+        # in global space.
+        position = self.pos_from_global.apply(position)
         angles = self._calculate_ik(position)
         coxa_angle = self.coxa.get_raw_angle(angles[0])
         femur_angle = self.femur.get_raw_angle(angles[1])

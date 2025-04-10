@@ -8,7 +8,7 @@ class Body:
     _walk_cycle_handles = [
         Coord3D(105, 30, -75),
         Coord3D(105, -30, -75),
-        Coord3D(105, 0, -75)
+        Coord3D(105, 0, 10)
     ]
     _shimmy_cycle_handles = [
         Coord3D(105, 30, -75),
@@ -46,42 +46,6 @@ class Body:
         self.lc_leg.set_position(self._standard_walk_cycle(t, *self._leg_walk_handles['lc']))
         self.lb_leg.set_position(self._standard_walk_cycle(opposite_t, *self._leg_walk_handles['lb']))
 
-    def shimmy(self, t):
-        self.rf_leg.set_position(self._shimmy_cycle(t, *self._leg_shimmy_handles['rf']))
-        self.rc_leg.set_position(self._shimmy_cycle(t, *self._leg_shimmy_handles['rc']))
-        self.rb_leg.set_position(self._shimmy_cycle(t, *self._leg_shimmy_handles['rb']))
-
-        self.lf_leg.set_position(self._shimmy_cycle(t, *self._leg_shimmy_handles['lf']))
-        self.lc_leg.set_position(self._shimmy_cycle(t, *self._leg_shimmy_handles['lc']))
-        self.lb_leg.set_position(self._shimmy_cycle(t, *self._leg_shimmy_handles['lb']))
-
-    def _build_shimmy_cycle(self):
-        self._leg_shimmy_handles = {
-            'rf': (
-                self._shimmy_cycle_handles[0].translate(Coord3D(20, 45, 0)).rotate(-self.hip_rotation, 'z'), 
-                self._shimmy_cycle_handles[1].translate(Coord3D(20, 45, 0)).rotate(-self.hip_rotation, 'z')
-            ),
-            'rc': (
-                self._shimmy_cycle_handles[0], 
-                self._shimmy_cycle_handles[1]
-            ),
-            'rb': (
-                self._shimmy_cycle_handles[0].translate(Coord3D(20, -45, 0)).rotate(self.hip_rotation, 'z'),
-                self._shimmy_cycle_handles[1].translate(Coord3D(20, -45, 0)).rotate(self.hip_rotation, 'z')
-            ),
-            'lf': (
-                self._shimmy_cycle_handles[1].translate(Coord3D(20, -45, 0)).rotate(self.hip_rotation, 'z'),
-                self._shimmy_cycle_handles[0].translate(Coord3D(20, -45, 0)).rotate(self.hip_rotation, 'z')            ),
-            'lc': (
-                self._shimmy_cycle_handles[1], 
-                self._shimmy_cycle_handles[0]
-            ),
-            'lb': (
-                self._shimmy_cycle_handles[1].translate(Coord3D(20, 45, 0)).rotate(-self.hip_rotation, 'z'),
-                self._shimmy_cycle_handles[0].translate(Coord3D(20, 45, 0)).rotate(-self.hip_rotation, 'z')
-            ),
-        }
-
     def _build_standard_walk_cycle(self):
         self._leg_walk_handles = {
             'rf': (
@@ -115,7 +79,43 @@ class Body:
                 self._walk_cycle_handles[2].translate(Coord3D(45, 45, 0)).rotate(-self.hip_rotation, 'z')
             ),
         }
-        print(self._leg_walk_handles)
+
+    def shimmy(self, t):
+        self.rf_leg.set_position(self._shimmy_cycle(t, *self._leg_shimmy_handles['rf']))
+        self.rc_leg.set_position(self._shimmy_cycle(t, *self._leg_shimmy_handles['rc']))
+        self.rb_leg.set_position(self._shimmy_cycle(t, *self._leg_shimmy_handles['rb']))
+
+        self.lf_leg.set_position(self._shimmy_cycle(t, *self._leg_shimmy_handles['lf']))
+        self.lc_leg.set_position(self._shimmy_cycle(t, *self._leg_shimmy_handles['lc']))
+        self.lb_leg.set_position(self._shimmy_cycle(t, *self._leg_shimmy_handles['lb']))
+
+    def _build_shimmy_cycle(self):
+        self._leg_shimmy_handles = {
+            'rf': (
+                self._shimmy_cycle_handles[0], 
+                self._shimmy_cycle_handles[1]
+            ),
+            'rc': (
+                self._shimmy_cycle_handles[0], 
+                self._shimmy_cycle_handles[1]
+            ),
+            'rb': (
+                self._shimmy_cycle_handles[0],
+                self._shimmy_cycle_handles[1]
+            ),
+            'lf': (
+                self._shimmy_cycle_handles[1],
+                self._shimmy_cycle_handles[0]
+            ),
+            'lc': (
+                self._shimmy_cycle_handles[1], 
+                self._shimmy_cycle_handles[0]
+            ),
+            'lb': (
+                self._shimmy_cycle_handles[1],
+                self._shimmy_cycle_handles[0]
+            ),
+        }
 
     def _shimmy_cycle(self, t:float, forward_point: Coord3D, backward_point: Coord3D):
         if t<.5:
