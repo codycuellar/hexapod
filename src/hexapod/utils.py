@@ -1,66 +1,104 @@
 import math
 
-class Coord3D:
-    def __init__(self, x: float, y: float, z: float):
+
+class Vector:
+    @staticmethod
+    def from_coord(coord: "Coord"):
+        return Vector(coord.x, coord.y, coord.z)
+
+    @staticmethod
+    def from_a_to_b(a: "Coord", b: "Coord"):
+        return Vector(b.x - a.x, b.y - a.y, b.z - a.z)
+
+    def __init__(self, x: float, y: float, z: float = 0):
         self.x = x
         self.y = y
         self.z = z
 
     def __str__(self):
-        return "Coord3D({:.1f}, {:.1f}, {:.1f})".format(self.x, self.y, self.z)
-    
+        return "Vector3D({:.4f}, {:.4f}, {:.4f})".format(self.x, self.y, self.z)
+
     def __repr__(self):
         return self.__str__()
 
+    def __add__(self, vec: "Vector"):
+        if not isinstance(vec, Vector):
+            raise TypeError("Operand must be an instance of Vector3D")
+        return Coord(self.x + vec.x, self.y + vec.y, self.z + vec.z)
+
+    def __subract__(self, vec: "Vector"):
+        if not isinstance(vec, Vector):
+            raise TypeError("Operand must be an instance of Vector3D")
+        return Coord(self.x - vec.x, self.y - vec.y, self.z - vec.z)
+
+    def dot(self, vec: "Vector"):
+        if not isinstance(vec, Vector):
+            raise TypeError("Operand must be an instance of Vector3D")
+        return self.x * vec.x + self.y * vec.y + self.z * vec.z
+
+    def cross(self, vec: "Vector"):
+        if not isinstance(vec, Vector):
+            raise TypeError("Operand must be an instance of Vector3D")
+        return Vector(
+            self.y * vec.z - self.z * vec.y,
+            self.z * vec.x - self.x * vec.z,
+            self.x * vec.y - self.y * vec.x,
+        )
+
+    def scale(self, scalar: float):
+        return Vector(self.x * scalar, self.y * scalar, self.z * scalar)
+
     def copy(self):
-        return Coord3D(self.x, self.y, self.z)
+        return self.__class__(self.x, self.y, self.z)
+
+    def length(self) -> float:
+        return math.sqrt(self.x**2 + self.y**2 + self.z**2)
+
+    def normalize(self) -> "Vector":
+        length = self.length()
+        if length == 0:
+            raise ValueError("Cannot normalize a zero-length vector")
+        return Vector(self.x / length, self.y / length, self.z / length)
 
     def as_list(self):
         return [self.x, self.y, self.z]
-    
-    def mirror(self, axis):
-        if axis == 'xy':
-            return Coord3D(self.x, self.y, -self.z)
-        elif axis == 'yz':
-            return Coord3D(-self.x, self.y, self.z)
-        elif axis == 'xz':
-            return Coord3D(self.x, -self.y, self.z)
-        else:
-            raise ValueError("Invalid axis. Use 'xy', 'yz', or 'xz'.")
-    
-    def translate(self, offset: 'Coord3D'):
-        return Coord3D(self.x + offset.x, self.y + offset.y, self.z + offset.z)
-    
-    def rotate(self, angle: float, axis: str):
-        """
-        Rotate the coordinate around the specified axis by the given angle in degrees.
-        """
-        angle = math.radians(angle) 
-        if axis == 'x':
-            y_new = self.y * math.cos(angle) - self.z * math.sin(angle)
-            z_new = self.y * math.sin(angle) + self.z * math.cos(angle)
-            return Coord3D(self.x, y_new, z_new)
-        elif axis == 'y':
-            x_new = self.x * math.cos(angle) + self.z * math.sin(angle)
-            z_new = -self.x * math.sin(angle) + self.z * math.cos(angle)
-            return Coord3D(x_new, self.y, z_new)
-        elif axis == 'z':
-            x_new = self.x * math.cos(angle) - self.y * math.sin(angle)
-            y_new = self.x * math.sin(angle) + self.y * math.cos(angle)
-            return Coord3D(x_new, y_new, self.z)
-        else:
-            raise ValueError("Invalid axis. Use 'x', 'y', or 'z'.")
 
-class Coord2D:
-    def __init__(self, x: float, y: float):
+
+class Coord:
+    def __init__(self, x: float, y: float, z: float = 0):
         self.x = x
         self.y = y
+        self.z = z
 
     def __str__(self):
-        return "Coord2D({:.1f}, {:.1f})".format(self.x, self.y)
+        return "Coord3D({:.4f}, {:.4f}, {:.4f})".format(self.x, self.y, self.z)
+
+    def __add__(self, vec: Vector):
+        if not isinstance(vec, Vector):
+            raise TypeError("Operand must be an instance of Vector3D")
+        return Coord(self.x + vec.x, self.y + vec.y, self.z + vec.z)
+
+    def __subtract__(self, vec: Vector):
+        if not isinstance(vec, Vector):
+            raise TypeError("Operand must be an instance of Vector3D")
+        return Coord(self.x - vec.x, self.y - vec.y, self.z - vec.z)
+
+    def copy(self):
+        return Coord(self.x, self.y, self.z)
 
     def as_list(self):
-        return [self.x, self.y]
+        return [self.x, self.y, self.z]
+
+    def mirror(self, axis):
+        if axis == "xy":
+            return Coord(self.x, self.y, -self.z)
+        elif axis == "yz":
+            return Coord(-self.x, self.y, self.z)
+        elif axis == "xz":
+            return Coord(self.x, -self.y, self.z)
+        else:
+            raise ValueError("Invalid axis. Use 'xy', 'yz', or 'xz'.")
+
 
 class Transform3D:
     """
@@ -71,7 +109,7 @@ class Transform3D:
     """
 
     @staticmethod
-    def from_matrix(matrix: list) -> 'Transform3D':
+    def from_matrix(matrix: list) -> "Transform3D":
         """
         Create a Transform3D object from a 4x4 matrix.
         """
@@ -84,14 +122,22 @@ class Transform3D:
         """
         Multiply two 4x4 matrices.
         """
-        result = [[0]*4 for _ in range(4)]
+        result = [[0] * 4 for _ in range(4)]
         for i in range(4):
             for j in range(4):
                 result[i][j] = sum(a[i][k] * b[k][j] for k in range(4))
         return result
 
-    def __init__(self, translation=None, x_rotation=0, y_rotation=0, z_rotation=0):
-        tx, ty, tz = (translation.x, translation.y, translation.z) if translation else (0, 0, 0)
+    def __init__(
+        self,
+        translation: Vector | None = None,
+        x_rotation=0,
+        y_rotation=0,
+        z_rotation=0,
+    ):
+        tx, ty, tz = (
+            (translation.x, translation.y, translation.z) if translation else (0, 0, 0)
+        )
         x_angle = math.radians(x_rotation)
         y_angle = math.radians(y_rotation)
         z_angle = math.radians(z_rotation)
@@ -105,21 +151,21 @@ class Transform3D:
             [1, 0, 0, 0],
             [0, cos_x, -sin_x, 0],
             [0, sin_x, cos_x, 0],
-            [0, 0, 0, 1]
+            [0, 0, 0, 1],
         ]
 
         rot_y = [
             [cos_y, 0, sin_y, 0],
             [0, 1, 0, 0],
             [-sin_y, 0, cos_y, 0],
-            [0, 0, 0, 1]
+            [0, 0, 0, 1],
         ]
 
         rot_z = [
             [cos_z, -sin_z, 0, 0],
             [sin_z, cos_z, 0, 0],
             [0, 0, 1, 0],
-            [0, 0, 0, 1]
+            [0, 0, 0, 1],
         ]
 
         # Combine rotations
@@ -130,17 +176,17 @@ class Transform3D:
             [rotation[0][0], rotation[0][1], rotation[0][2], tx],
             [rotation[1][0], rotation[1][1], rotation[1][2], ty],
             [rotation[2][0], rotation[2][1], rotation[2][2], tz],
-            [0, 0, 0, 1]
+            [0, 0, 0, 1],
         ]
 
-    def dot(self, other: 'Transform3D') -> 'Transform3D':
+    def dot(self, other: "Transform3D") -> "Transform3D":
         """
         Multiply two transformation matrices.
         """
         result = self._matrix_multiply(self.matrix, other.matrix)
         return Transform3D.from_matrix(result)
 
-    def invert(self) -> 'Transform3D':
+    def invert(self) -> "Transform3D":
         """
         Invert the transformation matrix.
         """
@@ -162,17 +208,17 @@ class Transform3D:
             rotation_transposed[0] + [inverted_translation[0]],
             rotation_transposed[1] + [inverted_translation[1]],
             rotation_transposed[2] + [inverted_translation[2]],
-            [0, 0, 0, 1]
+            [0, 0, 0, 1],
         ]
 
         return Transform3D.from_matrix(inverted_matrix)
 
-    def apply(self, coord: Coord3D) -> Coord3D:
-        if not isinstance(coord, Coord3D):
+    def apply(self, coord: Coord) -> Coord:
+        if not isinstance(coord, Coord):
             raise TypeError("Input must be an instance of Coord3D")
         x, y, z = coord.x, coord.y, coord.z
         m = self.matrix
-        new_x = m[0][0]*x + m[0][1]*y + m[0][2]*z + m[0][3]
-        new_y = m[1][0]*x + m[1][1]*y + m[1][2]*z + m[1][3]
-        new_z = m[2][0]*x + m[2][1]*y + m[2][2]*z + m[2][3]
-        return Coord3D(new_x, new_y, new_z)
+        new_x = m[0][0] * x + m[0][1] * y + m[0][2] * z + m[0][3]
+        new_y = m[1][0] * x + m[1][1] * y + m[1][2] * z + m[1][3]
+        new_z = m[2][0] * x + m[2][1] * y + m[2][2] * z + m[2][3]
+        return Coord(new_x, new_y, new_z)

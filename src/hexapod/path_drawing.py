@@ -1,14 +1,18 @@
 from hexapod.interpolation import lerp_3d, quad_bez_3d
-from hexapod.utils import Coord3D
+from hexapod.utils import Coord
 import math
 
-def walk_cycle(t: float, forward_point: Coord3D, backward_point: Coord3D, lift_point: Coord3D):
-    if t < .5:
+
+def walk_cycle(
+    t: float, forward_point: Coord, backward_point: Coord, lift_point: Coord
+):
+    if t < 0.5:
         t = t * 2
         return lerp_3d(forward_point, backward_point, t)
     else:
-        t = (t - .5) * 2
+        t = (t - 0.5) * 2
         return quad_bez_3d(backward_point, lift_point, forward_point, t)
+
 
 def circle_pattern(t, center_point):
     x = center_point[0] + 50 * math.cos(t)

@@ -6,7 +6,7 @@ sys.modules["servo"] = MagicMock()
 
 import matplotlib.pyplot as plt
 
-from hexapod.utils import Coord3D, Transform3D
+from hexapod.utils import Coord, Transform3D
 from hexapod.body import Body
 from hexapod.leg import Leg
 from hexapod.servo import Servo
@@ -125,22 +125,8 @@ trajectory = []  # Store the leg tip positions for visualization
 time_steps = 100
 
 for t in range(time_steps):
-    # Define a simple gait pattern (e.g., circular motion for each leg)
-    leg_positions = []
-    for i, leg in enumerate(hexapod.legs):
-        x = 50 * math.cos(t * 0.1 + i * math.pi / 3)  # Offset each leg's phase
-        y = 50 * math.sin(t * 0.1 + i * math.pi / 3)
-        z = -30 if (t // 10) % 2 == 0 else -40  # Alternate leg height
-        leg_positions.append(Coord3D(x, y, z))
+    hexapod.walk()
 
-    # Update the leg positions
-    hexapod.set_leg_positions(leg_positions)
-
-    # Record the trajectory for visualization
-    trajectory.append([(pos.x, pos.y, pos.z) for pos in leg_positions])
-
-# Extract trajectory components for each leg
-leg_trajectories = list(zip(*trajectory))  # Separate trajectories for each leg
 
 fig = plt.figure()
 ax = fig.add_subplot(111, projection="3d")

@@ -1,134 +1,93 @@
-from hexapod.utils import Coord3D
+from time import ticks_ms
+
+from hexapod.utils import Coord, Transform3D, Vector
 from hexapod.interpolation import lerp_3d, quad_bez_3d
 from hexapod.leg import Leg
 
-from servo import ServoCluster
 
 class Body:
-    _walk_cycle_handles = [
-        Coord3D(105, 30, -75),
-        Coord3D(105, -30, -75),
-        Coord3D(105, 0, 10)
-    ]
-    _shimmy_cycle_handles = [
-        Coord3D(105, 30, -75),
-        Coord3D(105, -30, -75),
-    ]
+    gaits = ["tripod"]
 
-    hip_rotation = 60
+    def __init__(
+        self,
+        rf: Leg,
+        rc: Leg,
+        rb: Leg,
+        lf: Leg,
+        lc: Leg,
+        lb: Leg,
+        initial_position: Transform3D | None = None,
+        initial_rotation: float = 0,
+        update_frequency: float = 1 / 50,
+    ):
+        """legs are ordered in right front, clockwise around the body."""
+        self.legs = [rf, rc, rb, lb, lc, lf]
+        self.foot_frames = [Coord(0, 0, 0) for _ in range(len(self.legs))]
 
-    def __init__(self, rf:Leg, rc:Leg, rb:Leg, lf:Leg, lc:Leg, lb:Leg):
-        self.rf_leg = rf
-        self.rc_leg = rc
-        self.rb_leg = rb
-        self.lf_leg = lf
-        self.lc_leg = lc
-        self.lb_leg = lb
-        self._build_standard_walk_cycle()
-        self._build_shimmy_cycle()
-    
-    def set_legs_active(self, legs):
-        self.rf_leg.enabled = legs[0]
-        self.rc_leg.enabled = legs[1]
-        self.rb_leg.enabled = legs[2]
-        self.lf_leg.enabled = legs[3]
-        self.lc_leg.enabled = legs[4]
-        self.lb_leg.enabled = legs[5]
+        self.update_frequency = update_frequency
 
-    def walk(self, t):
-        opposite_t = (t + .5) % 1
-        # opposite_t = t
-        self.rf_leg.set_position(self._standard_walk_cycle(t, *self._leg_walk_handles['rf']))
-        self.rc_leg.set_position(self._standard_walk_cycle(opposite_t, *self._leg_walk_handles['rc']))
-        self.rb_leg.set_position(self._standard_walk_cycle(t, *self._leg_walk_handles['rb']))
+        self.realtive_position = (
+            Transform3D(Coord(0, 0, 0), 0, 0, 0)
+            if initial_position is None
+            else initial_position
+        )
+        self.relative_rotation = initial_rotation
+        self.last_update = ticks_ms()
 
-        self.lf_leg.set_position(self._standard_walk_cycle(opposite_t, *self._leg_walk_handles['lf']))
-        self.lc_leg.set_position(self._standard_walk_cycle(t, *self._leg_walk_handles['lc']))
-        self.lb_leg.set_position(self._standard_walk_cycle(opposite_t, *self._leg_walk_handles['lb']))
+        self.current_gait = self.gaits[0]
+        self.current_velocity = Vector(0, 0, 0)
 
-    def _build_standard_walk_cycle(self):
-        self._leg_walk_handles = {
-            'rf': (
-                self._walk_cycle_handles[0].translate(Coord3D(45, 45, 0)).rotate(-self.hip_rotation, 'z'), 
-                self._walk_cycle_handles[1].translate(Coord3D(45, 45, 0)).rotate(-self.hip_rotation, 'z'),
-                self._walk_cycle_handles[2].translate(Coord3D(45, 45, 0)).rotate(-self.hip_rotation, 'z')
-            ),
-            'rc': (
-                self._walk_cycle_handles[0], 
-                self._walk_cycle_handles[1], 
-                self._walk_cycle_handles[2]
-            ),
-            'rb': (
-                self._walk_cycle_handles[0].translate(Coord3D(45, -45, 0)).rotate(self.hip_rotation, 'z'),
-                self._walk_cycle_handles[1].translate(Coord3D(45, -45, 0)).rotate(self.hip_rotation, 'z'),
-                self._walk_cycle_handles[2].translate(Coord3D(45, -45, 0)).rotate(self.hip_rotation, 'z')
-            ),
-            'lf': (
-                self._walk_cycle_handles[1].translate(Coord3D(45, -45, 0)).rotate(self.hip_rotation, 'z'),
-                self._walk_cycle_handles[0].translate(Coord3D(45, -45, 0)).rotate(self.hip_rotation, 'z'),
-                self._walk_cycle_handles[2].translate(Coord3D(45, -45, 0)).rotate(self.hip_rotation, 'z')
-            ),
-            'lc': (
-                self._walk_cycle_handles[1], 
-                self._walk_cycle_handles[0], 
-                self._walk_cycle_handles[2]
-            ),
-            'lb': (
-                self._walk_cycle_handles[1].translate(Coord3D(45, 45, 0)).rotate(-self.hip_rotation, 'z'),
-                self._walk_cycle_handles[0].translate(Coord3D(45, 45, 0)).rotate(-self.hip_rotation, 'z'),
-                self._walk_cycle_handles[2].translate(Coord3D(45, 45, 0)).rotate(-self.hip_rotation, 'z')
-            ),
-        }
+    def go_to_home(self):
+        """
+        When powered on, leg positions cannot accurately be read if they
+        have been physically moved, so this assumes the body is in contact with
+        the ground, and we can home the legs to a known position off the ground.
+        This will happen as fast as the servos can move, so it's the safest way to
+        initialize known positions.
+        """
 
-    def shimmy(self, t):
-        self.rf_leg.set_position(self._shimmy_cycle(t, *self._leg_shimmy_handles['rf']))
-        self.rc_leg.set_position(self._shimmy_cycle(t, *self._leg_shimmy_handles['rc']))
-        self.rb_leg.set_position(self._shimmy_cycle(t, *self._leg_shimmy_handles['rb']))
+    def update(self):
+        if self.current_velocity.length() > 0:
+            self._move(t)
 
-        self.lf_leg.set_position(self._shimmy_cycle(t, *self._leg_shimmy_handles['lf']))
-        self.lc_leg.set_position(self._shimmy_cycle(t, *self._leg_shimmy_handles['lc']))
-        self.lb_leg.set_position(self._shimmy_cycle(t, *self._leg_shimmy_handles['lb']))
+    def update_velocity(self, velocity: Vector):
+        self.current_velocity = velocity.normalize()
 
-    def _build_shimmy_cycle(self):
-        self._leg_shimmy_handles = {
-            'rf': (
-                self._shimmy_cycle_handles[0], 
-                self._shimmy_cycle_handles[1]
-            ),
-            'rc': (
-                self._shimmy_cycle_handles[0], 
-                self._shimmy_cycle_handles[1]
-            ),
-            'rb': (
-                self._shimmy_cycle_handles[0],
-                self._shimmy_cycle_handles[1]
-            ),
-            'lf': (
-                self._shimmy_cycle_handles[1],
-                self._shimmy_cycle_handles[0]
-            ),
-            'lc': (
-                self._shimmy_cycle_handles[1], 
-                self._shimmy_cycle_handles[0]
-            ),
-            'lb': (
-                self._shimmy_cycle_handles[1],
-                self._shimmy_cycle_handles[0]
-            ),
-        }
+    def change_gait(self, gait=None):
+        """
+        Change the gait of the hexapod. If no gait is specified, it will cycle to the next one.
+        param gait: The name of the gait to switch to from Body.gaits.
+                    If None, cycles to the next gait.
+        """
+        if gait is None:
+            next_gait = (self.gaits.index(self.current_gait) + 1) % len(self.gaits)
+            self.current_gait = self.gaits[next_gait]
 
-    def _shimmy_cycle(self, t:float, forward_point: Coord3D, backward_point: Coord3D):
-        if t<.5:
-            t = t * 2
-            return lerp_3d(forward_point, backward_point, t)
+        if gait not in self.gaits:
+            raise ValueError(f"Gait {gait} not found.")
+
+        self.current_gait = gait
+
+    def _move(self, t: float):
+        if self.current_gait == "tripod":
+            self._tripod_gait(t)
         else:
-            t = (t - .5) * 2
-            return lerp_3d(backward_point, forward_point, t)
-        
-    def _standard_walk_cycle(self, t: float, forward_point: Coord3D, backward_point: Coord3D, lift_point: Coord3D):
-        if t < .5:
-            t = t * 2
-            return lerp_3d(forward_point, backward_point, t)
-        else:
-            t = (t - .5) * 2
-            return quad_bez_3d(backward_point, lift_point, forward_point, t)
+            raise ValueError(f"Gait {self.current_gait} not implemented.")
+
+    def _tripod_gait(self, t: float):
+        """
+        Move the hexapod in a tripod gait pattern.
+        """
+        # Define the leg positions in the tripod gait
+        legs = [
+            self.rf_leg,
+            self.rc_leg,
+            self.rb_leg,
+            self.lf_leg,
+            self.lc_leg,
+            self.lb_leg,
+        ]
+
+        # Move the legs in a tripod pattern
+        for i in range(0, len(legs), 2):
+            legs[i].set_position(direction)
