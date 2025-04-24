@@ -1,19 +1,15 @@
 {
-    "python.languageServer": "Pylance",
-    "python.analysis.typeCheckingMode": "basic",
-    "python.analysis.diagnosticSeverityOverrides": {
-        "reportMissingModuleSource": "none"
-    },
-    "python.terminal.activateEnvironment": false,
-    "micropico.openOnStart": true,
-    "micropico.autoConnect": true,
-    "micropico.syncFolder": "src",
-    "python.analysis.typeshedPaths": [
-        "~/.micropico-stubs/included"
-    ],
-    "python.analysis.extraPaths": [
-        "~/.micropico-stubs/included"
-    ],
-    "editor.defaultFormatter": "ms-python.black-formatter",
-    "editor.formatOnSave": true
+  "python.languageServer": "Pylance",
+  "python.analysis.typeCheckingMode": "basic",
+  "python.analysis.diagnosticSeverityOverrides": {
+    "reportMissingModuleSource": "none"
+  },
+  "python.terminal.activateEnvironment": false,
+  "micropico.openOnStart": true,
+  "micropico.autoConnect": true,
+  "micropico.syncFolder": "",
+  "python.analysis.typeshedPaths": ["~/.micropico-stubs/included"],
+  "python.analysis.extraPaths": ["~/.micropico-stubs/included"],
+  "editor.defaultFormatter": "ms-python.black-formatter",
+  "editor.formatOnSave": true
 }

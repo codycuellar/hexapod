@@ -6,7 +6,7 @@ sys.modules["servo"] = MagicMock()
 
 import matplotlib.pyplot as plt
 
-from hexapod.utils import Coord, Transform3D
+from hexapod.utils import Point, Transform3D
 from hexapod.body import Body
 from hexapod.leg import Leg
 from hexapod.servo import Servo

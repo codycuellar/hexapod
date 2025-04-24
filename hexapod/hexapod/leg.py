@@ -1,4 +1,4 @@
-from hexapod.utils import Coord, Transform3D
+from hexapod.geometry_3d import Point, Transform
 from hexapod.servo import Servo
 import math
 
@@ -12,14 +12,14 @@ class Leg:
         coxa: Servo,
         femur: Servo,
         tibia: Servo,
-        mount_offset: Transform3D,
+        mount_offset: Transform,
         coxa_len=50,
         femur_len=50,
         tibia_len=50,
     ):
         """
         Initialize the leg with servo pin numbers for each joint (coxa, femur, tibia). Offsets
-        specify the angle of the coordinate plane relative to the body and ground plane when
+        specify the angle of the Pointinate plane relative to the body and ground plane when
         the servo is zeroed out on a scale of -90 to 90.
         """
         self.name = name
@@ -35,15 +35,15 @@ class Leg:
         self.femur_len = femur_len
         self.tib_len = tibia_len
 
-    def change_global_position(self, transform: Transform3D):
+    def change_global_position(self, transform: Transform):
         """
-        Change the reference point of this leg with respect to the global coordinate system.
+        Change the reference point of this leg with respect to the global Pointinate system.
         The leg already knows it's relative transform from the body center, but as the body
         moves, this function will update the body's transform relative to the global origin.
         """
         self.pos_from_global = self.mount_offset.dot(transform.invert())
 
-    def set_position(self, position: Coord):
+    def set_position(self, position: Point):
         """
         Set a position for the leg tip in global space. The leg will compute the relative
         position using the pos_from_global which is updated by the controlling body.
@@ -51,7 +51,7 @@ class Leg:
         if self.enabled == False:
             return
 
-        # Get the gloobal coordinate relative to the leg's current position
+        # Get the gloobal Pointinate relative to the leg's current position
         # in global space.
         position = self.pos_from_global.apply(position)
         angles = self._calculate_ik(position)
@@ -78,7 +78,7 @@ class Leg:
             return
         self._set_servo_angles(0, 0, 0)
 
-    def _calculate_ik(self, position: Coord):
+    def _calculate_ik(self, position: Point):
         """
         Calculates the angles from the leg hip joint to the tip point in 3d space,
         with x axis being parallel to the ground plane, perpindicular to the mount point.

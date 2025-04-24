@@ -1,6 +1,4 @@
-from time import ticks_ms
-
-from hexapod.utils import Coord, Transform3D, Vector
+from hexapod.geometry_3d import Point, Transform, Vector, Rotation
 from hexapod.interpolation import lerp_3d, quad_bez_3d
 from hexapod.leg import Leg
 
@@ -10,29 +8,25 @@ class Body:
 
     def __init__(
         self,
-        rf: Leg,
-        rc: Leg,
-        rb: Leg,
-        lf: Leg,
-        lc: Leg,
-        lb: Leg,
-        initial_position: Transform3D | None = None,
+        legs: dict[str, Leg],
+        initial_position: Transform | None = None,
         initial_rotation: float = 0,
         update_frequency: float = 1 / 50,
+        max_velocity: float = 20,
     ):
         """legs are ordered in right front, clockwise around the body."""
-        self.legs = [rf, rc, rb, lb, lc, lf]
-        self.foot_frames = [Coord(0, 0, 0) for _ in range(len(self.legs))]
+        self.legs = legs
+        self.foot_frames = self._set_foot_frames(legs)
 
         self.update_frequency = update_frequency
+        self.max_velocity = max_velocity
 
-        self.realtive_position = (
-            Transform3D(Coord(0, 0, 0), 0, 0, 0)
+        self.relative_position = (
+            Transform(Vector(0, 0, 0), Rotation(0, 0, 0))
             if initial_position is None
             else initial_position
         )
         self.relative_rotation = initial_rotation
-        self.last_update = ticks_ms()
 
         self.current_gait = self.gaits[0]
         self.current_velocity = Vector(0, 0, 0)
@@ -45,10 +39,10 @@ class Body:
         This will happen as fast as the servos can move, so it's the safest way to
         initialize known positions.
         """
+        pass
 
     def update(self):
-        if self.current_velocity.length() > 0:
-            self._move(t)
+        pass
 
     def update_velocity(self, velocity: Vector):
         self.current_velocity = velocity.normalize()
@@ -68,6 +62,17 @@ class Body:
 
         self.current_gait = gait
 
+    def _set_foot_frames(self, legs: dict[str, Leg]):
+        foot_frames = {}
+        for name, leg in legs.items():
+            leg.change_global_position(self.relative_position)
+            base = leg.pos_from_global
+            offset = leg.coxa_len + (leg.femur_len + leg.tib_len) / 2
+            foot_frames[name] = (
+                base.position() + base.translation().normalize() * offset
+            )
+        return foot_frames
+
     def _move(self, t: float):
         if self.current_gait == "tripod":
             self._tripod_gait(t)
@@ -78,16 +83,4 @@ class Body:
         """
         Move the hexapod in a tripod gait pattern.
         """
-        # Define the leg positions in the tripod gait
-        legs = [
-            self.rf_leg,
-            self.rc_leg,
-            self.rb_leg,
-            self.lf_leg,
-            self.lc_leg,
-            self.lb_leg,
-        ]
-
-        # Move the legs in a tripod pattern
-        for i in range(0, len(legs), 2):
-            legs[i].set_position(direction)
+        pass

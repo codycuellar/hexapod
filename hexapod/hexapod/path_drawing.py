@@ -1,10 +1,10 @@
 from hexapod.interpolation import lerp_3d, quad_bez_3d
-from hexapod.utils import Coord
+from hexapod.utils import Point
 import math
 
 
 def walk_cycle(
-    t: float, forward_point: Coord, backward_point: Coord, lift_point: Coord
+    t: float, forward_point: Point, backward_point: Point, lift_point: Point
 ):
     if t < 0.5:
         t = t * 2
