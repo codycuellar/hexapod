@@ -166,7 +166,7 @@ class Matrix:
 
     @property
     def T(self) -> "Matrix":
-        """Return the transposed view of this matrix."""
+        """Get the transposed view of this matrix."""
         if self._ndim == 0:
             return self.copy()
         if self._ndim == 1:
@@ -189,23 +189,31 @@ class Matrix:
         return self._ndim
 
     def ncols(self) -> int:
-        """Logical number of columns (respects lazy transpose view)."""
+        """Logical number of columns."""
         if self._ndim == 0:
             return 0
         return len(self._data[0])
 
     def copy(self) -> "Matrix":
-        """Return a copy of this matrix."""
+        """Get a deep copy of this Matrix."""
         return Matrix([row[:] for row in self._data])
 
     def inverse(self) -> "Matrix":
+        """
+        Check that the Matrix is orthogonal and then return its transpose,
+        otherwise throw an error.
+        """
         if self.is_orthogonal():
             return self.T
         else:
             raise ValueError("Matrix is not orthogonal and cannot be inverted.")
 
     def is_orthogonal(self, tol: float = 1e-6) -> bool:
-        """Check if this matrix is orthogonal."""
+        """
+        Check if this matrix is orthogonal, or that it's transpose
+        dot multiplied with itself renders very close to an identity
+        Matrix.
+        """
         mat = self @ self.T
         return all(
             abs(mat._get_value(i, j) - (1 if i == j else 0)) < tol
@@ -214,6 +222,17 @@ class Matrix:
         )
 
     def as_list(self, copy: bool = True):
+        """
+        Get the raw representation of this Matrix.
+        :param copy: If False, will not create a deep copy of the underlyiny
+                     data. This can improve speed, but should only be used on
+                     intermediary Matrixes where the reference will not be stored,
+                     otherwise you may unintentially mutate the Matrix data.
+        :return: The raw data
+          - float for scalar Matrix
+          - list[float] for 1D Matrix
+          - list[list[float]] for 2D Matrix.
+        """
         if self._ndim == 0:
             return self._data[0][0]
         elif self._ndim == 1:
@@ -232,12 +251,14 @@ class Matrix:
         return self._data[index]
 
     def _get_value(self, row: int, col: int) -> float:
-        """Get the underlying data value at physical (row, col)."""
+        """
+        Get the underlying data value at physical (row, col). Since
+        all types are stored as list of lists, Scalars will need to
+        get m(0, 0), 1D Matrix needs to get m(0, i), and 2D matrix
+        m(i, j). This is private due to the internal knowledge needed
+        of the ndims.
+        """
         return self._data[row][col]
-
-    def _set_value(self, row: int, col: int, value: float) -> None:
-        """Set the underlying data value at physical (row, col)."""
-        self._data[row][col] = value
 
     def _elementwise(self, other, op: str) -> "Matrix":
         """
@@ -261,22 +282,22 @@ class Matrix:
         else:
             raise ValueError(f"Unsupported operation '{op}'")
 
-        # Scalar + anything
-        if self._ndim == 0:
-            scalar = self._data[0][0]
+        # Scalar & Any | Any & Scalar
+        if self._ndim == 0 or other._ndim == 0:
+            # Pick scalar vs matrix
+            if self._ndim == 0 and other._ndim == 0:
+                return Matrix(func(self._data[0][0], other._data[0][0]))
+            scalar, mat = (
+                (self._data[0][0], other)
+                if self._ndim == 0
+                else (other._data[0][0], self)
+            )
             result = [
-                [func(scalar, other._get_value(r, c)) for c in range(other.ncols())]
-                for r in range(other.nrows())
+                [func(scalar, mat._get_value(r, c)) for c in range(mat.ncols())]
+                for r in range(mat.nrows())
             ]
-            return Matrix(result)
-
-        if other._ndim == 0:
-            scalar = other._data[0][0]
-            result = [
-                [func(self._get_value(r, c), scalar) for c in range(self.ncols())]
-                for r in range(self.nrows())
-            ]
-            return Matrix(result)
+            # if mat was 1D, flatten to 1D
+            return Matrix(result[0] if mat._ndim == 1 else result)
 
         # 1-D + 1-D
         if self._ndim == 1 and other._ndim == 1:
