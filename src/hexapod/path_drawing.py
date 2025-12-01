@@ -1,5 +1,5 @@
 from hexapod.interpolation import lerp_3d, quad_bez_3d
-from hexapod.utils import Point
+from hexapod.engine import Point
 import math
 
 

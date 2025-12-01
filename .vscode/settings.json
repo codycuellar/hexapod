@@ -11,5 +11,6 @@
   "python.analysis.typeshedPaths": ["~/.micropico-stubs/included"],
   "python.analysis.extraPaths": ["~/.micropico-stubs/included"],
   "editor.defaultFormatter": "ms-python.black-formatter",
-  "editor.formatOnSave": true
+  "editor.formatOnSave": true,
+  "python-envs.pythonProjects": []
 }

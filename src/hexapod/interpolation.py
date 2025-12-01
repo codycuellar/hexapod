@@ -1,5 +1,5 @@
 import math
-from hexapod.geometry_3d import Point
+from hexapod.engine import Point
 
 
 def lerp(v1: float, v2: float, t: float):
