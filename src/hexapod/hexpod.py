@@ -1,157 +1,29 @@
 import math
 
-from hexapod.engine import Point, Transform, Vector, Rotation
-from hexapod.interpolation import lerp_3d, quad_bez_3d
-from hexapod.servo import Servo
+from hexapod.engine import Frame, Transform, Vector, Rotation
+from hexapod.joint_control import RawJointControl
+from enum import Enum
 
 
-# TODO: Import a JSON or other config for dimensions and parameters
-
-
-class Leg:
-    enabled = True
-
-    def __init__(
-        self,
-        name: str,
-        coxa: Servo,
-        femur: Servo,
-        tibia: Servo,
-        mount_offset: Transform,
-        coxa_len=50,
-        femur_len=50,
-        tibia_len=50,
-    ):
-        """
-        Initialize the leg with servo pin numbers for each joint (coxa, femur, tibia). Offsets
-        specify the angle of the Pointinate plane relative to the body and ground plane when
-        the servo is zeroed out on a scale of -90 to 90.
-        """
-        self.name = name
-
-        self.mount_offset = mount_offset.invert()
-        self.pos_from_global = self.mount_offset
-
-        self.coxa = coxa
-        self.femur = femur
-        self.tibia = tibia
-
-        self.coxa_len = coxa_len
-        self.femur_len = femur_len
-        self.tib_len = tibia_len
-
-    def change_global_position(self, transform: Transform):
-        """
-        Change the reference point of this leg with respect to the global Pointinate system.
-        The leg already knows it's relative transform from the body center, but as the body
-        moves, this function will update the body's transform relative to the global origin.
-        """
-        self.pos_from_global = self.mount_offset.dot(transform.invert())
-
-    def set_position(self, position: Point):
-        """
-        Set a position for the leg tip in global space. The leg will compute the relative
-        position using the pos_from_global which is updated by the controlling body.
-        """
-        if self.enabled == False:
-            return
-
-        # Get the gloobal Pointinate relative to the leg's current position
-        # in global space.
-        position = self.pos_from_global.apply(position)
-        angles = self._calculate_ik(position)
-        return self._set_servo_angles(*angles)
-
-    def set_angles(self, s1, s2, s3):
-        if self.enabled == False:
-            return
-        self.coxa.set_angle(s1)
-        self.femur.set_angle(s2)
-        self.tibia.set_angle(s3)
-
-    def enable(self):
-        self.enabled = True
-
-    def disable(self):
-        self.enabled = False
-
-    def get_servo_name(self, servo):
-        return f"{self.name} {servo.name}"
-
-    def zero_servos(self):
-        if self.enabled == False:
-            return
-        self._set_servo_angles(0, 0, 0)
-
-    def _calculate_ik(self, position: Point):
-        """
-        Calculates the angles from the leg hip joint to the tip point in 3d space,
-        with x axis being parallel to the ground plane, perpindicular to the mount point.
-        """
-        a1 = math.degrees(math.atan2(position.y, position.x))
-
-        xyH = max(0, math.sqrt(position.y**2 + position.x**2) - self.coxa_len)
-        zH = math.sqrt(position.z**2 + xyH**2)
-        if (self.femur_len + self.tib_len) <= zH:
-            raise ValueError(f"Reach distance {zH} exceeds femur + tibia length.")
-        z_theta = math.atan2(position.z, xyH)
-        a2cos = (self.femur_len**2 + zH**2 - self.tib_len**2) / (
-            2 * self.femur_len * zH
-        )
-        a2 = math.degrees(math.acos(a2cos) + z_theta)
-
-        a3 = math.degrees(
-            math.acos(
-                (self.femur_len**2 + self.tib_len**2 - zH**2)
-                / (2 * self.tib_len * self.femur_len)
-            )
-        )
-
-        return (a1, a2, a3)
-
-    def _clamp(self, value, min_val, max_val):
-        """Ensures the servo stays within it's calibrated limits."""
-        return max(min(value, max_val), min_val)
-
-    def _set_servo_angles(self, a1, a2, a3):
-        """Convert IK angles to raw angle positions and update the servo."""
-        s1 = self.coxa.get_raw_angle(a1)
-        s2 = self.femur.get_raw_angle(a2)
-        s3 = self.tibia.get_raw_angle(a3)
-        return (
-            self.coxa.set_angle(s1),
-            self.femur.set_angle(s2),
-            self.tibia.set_angle(s3),
-        )
+class LegID(Enum):
+    LF = 0
+    LM = 1
+    LR = 2
+    RF = 3
+    RM = 4
+    RR = 5
 
 
 class Body:
-    gaits = ["tripod"]
-
-    def __init__(
-        self,
-        legs: dict[str, Leg],
-        initial_position: Transform | None = None,
-        initial_rotation: float = 0,
-        update_frequency: float = 1 / 50,
-        max_velocity: float = 20,
-    ):
+    def __init__(self, frame: Frame, legs: dict[LegID, "Leg"]):
         """legs are ordered in right front, clockwise around the body."""
+        self.frame = frame
+
+        for key in legs:
+            legs[key].frame.parent = frame
+
         self.legs = legs
         self.foot_frames = self._set_foot_frames(legs)
-
-        self.update_frequency = update_frequency
-        self.max_velocity = max_velocity
-
-        self.relative_position = (
-            Transform(Vector(0, 0, 0), Rotation(0, 0, 0))
-            if initial_position is None
-            else initial_position
-        )
-        self.relative_rotation = initial_rotation
-
-        self.current_gait = self.gaits[0]
-        self.current_velocity = Vector(0, 0, 0)
 
     def go_to_home(self):
         """
@@ -208,6 +80,108 @@ class Body:
         pass
 
 
-class Hexapod:
-    def __init__(self):
-        pass
+class Joint:
+    def __init__(self, frame: Frame, control: RawJointControl, length_to_child: float):
+        super().__init__()
+        self.frame = frame
+        self.control = control
+        self.length_to_child = length_to_child
+
+
+class Leg:
+    def __init__(
+        self,
+        id: LegID,
+        frame: Frame,
+        coxa: Joint,
+        femur: Joint,
+        tibia: Joint,
+    ):
+        """
+        Initialize the leg with servo pin numbers for each joint (coxa, femur, tibia). Offsets
+        specify the angle of the Pointinate plane relative to the body and ground plane when
+        the servo is zeroed out on a scale of -90 to 90.
+        """
+        self.id = id
+        self.frame = frame
+
+        self.coxa = coxa
+        self.femur = femur
+        self.tibia = tibia
+        self.foot = (
+            Frame()
+        )  # how do we know where this is initially based on the angles and lengths of components?
+        self.coxa.frame.parent = self.frame
+        self.femur.frame.parent = self.coxa.frame
+        self.tibia.frame.parent = self.femur.frame
+        self.foot.parent = self.tibia.frame
+
+    def set_foot_pos(self, position: Vector):
+        foot_local = self.foot.to_local_position(position, self.coxa.frame)
+
+        angles = self._calculate_ik(position)
+        self._set_servo_angles(*angles)
+        self._update()
+
+    def set_angles(self, s1, s2, s3):
+        if self.enabled == False:
+            return
+        self.coxa.control.set_angle(s1)
+        self.femur.control.set_angle(s2)
+        self.tibia.control.set_angle(s3)
+
+    def enable(self):
+        self.enabled = True
+
+    def disable(self):
+        self.enabled = False
+
+    def zero_servos(self):
+        if self.enabled == False:
+            return
+        self._set_servo_angles(0, 0, 0)
+
+    def _calculate_ik(self, position: Vector) -> tuple[float, float, float]:
+        """
+        Calculates the angles from the leg hip joint to the tip point in 3d space,
+        with x axis being parallel to the ground plane, perpindicular to the mount point.
+        """
+        cox_len = self.coxa.length_to_child
+        fem_len = self.femur.length_to_child
+        tib_len = self.tibia.length_to_child
+
+        a1 = math.degrees(math.atan2(position.y, position.x))
+
+        xyH = max(0, math.sqrt(position.y**2 + position.x**2) - cox_len)
+        zH = math.sqrt(position.z**2 + xyH**2)
+        if (fem_len + tib_len) <= zH:
+            raise ValueError(f"Reach distance {zH} exceeds femur + tibia length.")
+        z_theta = math.atan2(position.z, xyH)
+        a2cos = (fem_len**2 + zH**2 - tib_len**2) / (2 * fem_len * zH)
+        a2 = math.degrees(math.acos(a2cos) + z_theta)
+
+        a3 = math.degrees(
+            math.acos((fem_len**2 + tib_len**2 - zH**2) / (2 * tib_len * fem_len))
+        )
+
+        return (a1, a2, a3)
+
+    def _clamp(self, value, min_val, max_val):
+        """Ensures the servo stays within it's calibrated limits."""
+        return max(min(value, max_val), min_val)
+
+    def _set_servo_angles(self, ca, fa, ta):
+        """Convert IK angles to raw angle positions and update the servo."""
+        # s1 = self.coxa.control.get_raw_value(a1)
+        # s2 = self.femur.control.get_raw_value(a2)
+        # s3 = self.tibia.control.get_raw_value(a3)
+        return (
+            self.coxa.control.set_angle(ca),
+            self.femur.control.set_angle(fa),
+            self.tibia.control.set_angle(ta),
+        )
+
+    def _update(self):
+        self.coxa.control.update()
+        self.femur.control.update()
+        self.tibia.control.update()

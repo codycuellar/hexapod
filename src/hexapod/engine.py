@@ -5,9 +5,24 @@ from hexapod.matmath import Matrix
 
 
 class Vector(Matrix):
-    """A 3D Vector which represents motion or translation in space."""
+    """
+    A 3D Vector which represents motion or translation in space, as well as generic 3D
+    positions in space.
+    """
 
     def __init__(self, data: list[float] | Matrix | None = None):
+        """
+        Initialize a vector using any data type representing a vector of 3 items.
+        It can be:
+          - [f, f, f]
+          - [[f], [f], [f]]
+          - Matrix(3,)
+          - Matrix(3,1)
+          - Matrix(1, 3)
+        :param self: Description
+        :param data: Description
+        :type data: list[float] | Matrix | None
+        """
         if data is None:
             super().__init__([0.0, 0.0, 0.0])
         elif isinstance(data, Matrix):
@@ -182,6 +197,10 @@ class Transform(Matrix):
     """
 
     @staticmethod
+    def identity():
+        return Transform(Matrix.identity(4))
+
+    @staticmethod
     def create(
         rotation: "Rotation | Matrix | None" = None,
         translation: "Vector | Matrix | None" = None,
@@ -281,55 +300,88 @@ class Frame:
     def origin(self):
         return self.transform.translation
 
+    @origin.setter
+    def origin(self, value: Vector):
+        self.transform = Transform.create(self.transform.rotation, value)
+
     @property
     def rotation(self):
         return self.transform.rotation
 
-    def set_local_origin(self, origin: Vector):
-        self.transform = Transform.create(self.transform.rotation, origin)
-
-    def set_local_rotation(self, rotation: Rotation):
+    @rotation.setter
+    def rotation(self, rotation: Rotation):
         self.transform = Transform.create(rotation, self.transform.translation)
 
     def move_local(self, delta: Vector) -> "Frame":
+        """
+        Update the frame origin by a delta.
+        :param delta: The vector to move the frame origin by.
+        """
         self.transform = self.transform.translate(delta)
         return self
 
     def rotate_local(self, delta: Rotation) -> "Frame":
+        """
+        Update the frame origin by a delta.
+        :param delta: The vector to move the frame origin by.
+        """
         self.transform = self.transform.rotate(delta)
         return self
 
-    def get_pos_from(self, target: "Frame") -> Vector:
-        return (self._get_parent_frame_t(target) @ self.transform).translation
+    def get_position_in_frame(self, target: "Frame | None" = None) -> Vector:
+        """
+        Get this frame's origin position relative to a parent target. If no
+        target is supplied, we traverse the parent tree to the top-most (usually
+        World space).
+        :param target: The target parent frame to calculate the relative position from.
+        :return: The position of this frame's origin within in the target frame.
+        """
+        relative_t = self._get_transform_to(target)
+        return Vector(relative_t @ Transform.create(translation=self.origin))
 
-    def move_from(self, delta: Vector, target: "Frame | None" = None) -> "Frame":
-        parent_t = self._get_parent_frame_t(target)
-        pos_from_target = (parent_t @ self.transform).translation + delta
-        local_pos = parent_t.inverse() @ Transform.create(translation=pos_from_target)
-        self.set_local_origin(local_pos.translation)
-        return self
+    def to_local_position(
+        self, position: Vector, target: "Frame | None" = None
+    ) -> Vector:
+        """
+        Convert a position relative to a parent frame into local frame coordinate.
+        :param position: The position relative to a parent frame to convert to this
+                         frame's context.
+        :param target: The target parent frame to calculate the relative position from.
+        :return: The converted coordinate position
+        """
+        relative_t_inv = self._get_transform_to(target).inverse()
+        pos_inv = relative_t_inv @ Transform.create(translation=position)
+        return pos_inv.translation
 
-    def _get_parent_frame_t(self, target: "Frame | None" = None) -> Transform:
-        node_not_parent = True
-        node = self
-        while node is not None:
-            if node is target:
-                node_not_parent = False
-            node = node.parent
+    def to_frame_position(
+        self, position: Vector, target: "Frame|None" = None
+    ) -> Vector:
+        """
+        Docstring for to_frame_position
+        :param position: Description
+        :param target: Description
+        """
+        relative_t = self._get_transform_to(target)
+        pos = relative_t @ Transform.create(translation=position)
+        return pos.translation
 
-        if target and node_not_parent:
-            raise RuntimeError("Could not find target in parent node tree.")
-
+    def _get_transform_to(self, target: "Frame | None" = None) -> Transform:
+        """
+        Get the transform from a target parent frame to the local frame.
+        :param target: The final target frame to find when traversing parents.
+        :return: The transform, not including the current frame's transform.
+        """
         node = self.parent
-        transform = Transform.create()
-
-        if self is target:
-            return transform
+        transform = Transform.identity()
 
         while node is not None:
             transform = node.transform @ transform
             if node is target:
                 break
             node = node.parent
+
+        if target and not node:
+            # we didnt' find the parent
+            raise RuntimeError("Target frame not found in parent hierarchy.")
 
         return transform

@@ -159,7 +159,7 @@ class Matrix:
         return self.nrows()
 
     def __repr__(self) -> str:
-        return f"Matrix({self.as_list()})"
+        return f"{self.__class__.__name__}({self.as_list()})"
 
     def __str__(self) -> str:
         return f"{self.as_list()}"

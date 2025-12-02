@@ -1,12 +1,23 @@
 from servo import ServoCluster as RawCluster
+from hexapod.joint_control import RawJointControl
 
-class Servo:
-    
+
+class Servo(RawJointControl):
+
     @staticmethod
-    def create_cluster(pin_numbers:list):
+    def create_cluster(pin_numbers: list):
         return RawCluster(0, 0, pin_numbers)
 
-    def __init__(self, name:str, cluster:RawCluster, pin_number:int, upper_limit:int, lower_limit:int, zeroed_angle:int, inverted = False):
+    def __init__(
+        self,
+        name: str,
+        cluster: RawCluster,
+        pin_number: int,
+        upper_limit: int,
+        lower_limit: int,
+        zeroed_angle: int,
+        inverted=False,
+    ):
         """
         Configuration for a servo motor.
         param name: The servo name for logging purposes.
@@ -32,14 +43,15 @@ class Servo:
             # Non-inverted servo: limits stay as they are
             upper_limit = upper_limit - self.zeroed_angle
             lower_limit = lower_limit + self.zeroed_angle
-        
+
         self.pos_limit = max(upper_limit, lower_limit)
         self.neg_limit = min(upper_limit, lower_limit)
+        self.angle = zeroed_angle
 
     def set_angle(self, angle):
-        return self.cluster.value(self.pin_number, angle)
+        self.angle = angle
 
-    def get_raw_angle(self, desired_angle):
+    def get_raw_value(self, desired_angle):
         """
         Convert a body-relative angle to the actual servo command angle.
 
@@ -53,7 +65,10 @@ class Servo:
         else:
             # Non-inverted servo: add the desired angle to the zeroed angle
             return self._clamp(desired_angle - self.zeroed_angle)
-    
+
+    def update(self):
+        return self.cluster.value(self.pin_number, self.angle)
+
     def _clamp(self, value):
         """
         Clamp the value to the servo motor limits.
