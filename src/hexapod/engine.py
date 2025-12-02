@@ -11,25 +11,28 @@ class Vector(Matrix):
         if data is None:
             super().__init__([0.0, 0.0, 0.0])
         elif isinstance(data, Matrix):
-            if data.shape != (3,):
-                raise ValueError("Matrix must be of shape (3,) to convert to Vector.")
-            super().__init__(data._data[0])
+            if data.shape == (3,) or data.shape == (1, 3):
+                super().__init__(data._data[0])
+            elif data.shape == (3, 1):
+                super().__init__(data.T._data[0])
+            else:
+                raise ValueError(f"Input Matrix invalid shape. Received {data.shape}")
         else:
             if len(data) != 3:
-                raise ValueError("Vector must be initialized with 3 elements.")
+                raise ValueError("Vector list must contain 3 elements.")
             super().__init__(data)
 
-    def __add__(self, other: "Vector") -> "Vector":
-        return Vector((super() + other))
+    def __add__(self, other) -> "Vector":
+        return Vector(super().__add__(other))
 
-    def __sub__(self, other: "Vector") -> "Vector":
-        return Vector((super() - other))
+    def __sub__(self, other) -> "Vector":
+        return Vector(super().__sub__(other))
 
     def __mul__(self, scalar: float) -> "Vector":
-        return Vector((super() * scalar))
+        return Vector(super().__mul__(scalar))
 
     def __truediv__(self, scalar: float) -> "Vector":
-        return Vector((super() / scalar))
+        return Vector(super().__truediv__(scalar))
 
     def __matmul__(self, other: "Vector") -> float:
         result = super().__matmul__(other)
@@ -161,7 +164,7 @@ class Rotation(Matrix):
         raise NotImplementedError("Rotation division is not defined.")
 
     def __matmul__(self, other: "Rotation | Vector"):
-        result = super() @ other
+        result = super().__matmul__(other)
         if isinstance(other, Rotation):
             return Rotation(result.as_list(copy=False))  # type: ignore
         elif isinstance(other, Vector):
@@ -182,7 +185,7 @@ class Transform(Matrix):
     def create(
         rotation: "Rotation | Matrix | None" = None,
         translation: "Vector | Matrix | None" = None,
-    ):
+    ) -> "Transform":
         # Build 4x4 homogeneous matrix
         if not isinstance(rotation, Rotation):
             rotation = Rotation(rotation)
@@ -229,20 +232,8 @@ class Transform(Matrix):
                 raise ValueError("Matrix must be initialized with a 4x4 list.")
             super().__init__(data)
 
-    def __matmul__(self, other) -> "Transform | Vector":
-        if not isinstance(other, Matrix):
-            other = Matrix(other)
-
-        if other.shape == (4, 4):
-            return Transform(super() @ other)
-        elif other.shape == (4,):
-            return Vector(super() @ other)
-        elif other.shape == (3,):
-            return Vector(super() @ Matrix(other._get_row(0) + [1.0]))
-        else:
-            raise ValueError(
-                f"Right hand of matrix multiply with Transform produced unexpected shape {other.shape}"
-            )
+    def __matmul__(self, other: "Transform") -> "Transform":
+        return Transform(super().__matmul__(other))
 
     @property
     def rotation(self) -> Rotation:
@@ -250,13 +241,13 @@ class Transform(Matrix):
 
     @property
     def translation(self) -> Vector:
-        return Vector(self[0:3, 3])
+        return Vector(self[0:3, 3].T)
 
     def rotate(self, rotation: Rotation) -> "Transform":
-        return Transform(self @ Transform.create(rotation=rotation))
+        return self @ Transform.create(rotation=rotation)
 
     def translate(self, translation: Vector) -> "Transform":
-        return Transform(self @ Transform.create(translation=translation))
+        return self @ Transform.create(translation=translation)
 
     def inverse(self) -> "Transform":
         rot_inv = self.rotation.inverse()
@@ -274,7 +265,7 @@ class Frame:
     def __init__(
         self,
         origin: Vector = Vector(),
-        rotation: Rotation = Rotation.identity(),
+        rotation: Rotation = Rotation(),
         parent: "Frame | None" = None,
     ):
         """
@@ -283,37 +274,62 @@ class Frame:
         :param parent: The parent frame of this frame. The only frame without a parennt
                        should be the world frame.
         """
-        self.origin = origin
-        self.parent = parent
-        self.rotation = rotation
+        self.transform: Transform = Transform.create(rotation, origin)
+        self.parent: "Frame | None" = parent
 
-    def rotation(self, rotation: Rotation):
-        """Set the rotation matrix for the frame."""
-        if not isinstance(rotation, Rotation):
-            raise TypeError("Rotation must be an instance of Rotation")
-        self.rotation = rotation
+    @property
+    def origin(self):
+        return self.transform.translation
 
-    def get_global_position(self) -> "Frame":
-        """Get the global position of the frame."""
-        if self.parent is None:
-            return self
-        parent_global = self.parent.get_global_position()
-        transformed_point = Transform(
-            translation=Vector(self.as_list()),
-            rotation=self.rotation,
-        ).apply(parent_global)
-        return transformed_point
+    @property
+    def rotation(self):
+        return self.transform.rotation
 
-    def get_global_rotation(self) -> Rotation:
-        """Get the global rotation of the frame."""
-        if self.parent is None:
-            return self.rotation
-        parent_global_rotation = self.parent.get_global_rotation()
-        combined_rotation_matrix = matmult(parent_global_rotation.m, self.rotation.m)
-        return Rotation.from_matrix(combined_rotation_matrix)
+    def set_local_origin(self, origin: Vector):
+        self.transform = Transform.create(self.transform.rotation, origin)
 
-    def copy(self) -> "Frame":
-        """Create a copy of the frame."""
-        new_frame = Frame(self.x, self.y, self.z, self.parent)
-        new_frame.rotation = self.rotation.copy()
-        return new_frame
+    def set_local_rotation(self, rotation: Rotation):
+        self.transform = Transform.create(rotation, self.transform.translation)
+
+    def move_local(self, delta: Vector) -> "Frame":
+        self.transform = self.transform.translate(delta)
+        return self
+
+    def rotate_local(self, delta: Rotation) -> "Frame":
+        self.transform = self.transform.rotate(delta)
+        return self
+
+    def get_pos_from(self, target: "Frame") -> Vector:
+        return (self._get_parent_frame_t(target) @ self.transform).translation
+
+    def move_from(self, delta: Vector, target: "Frame | None" = None) -> "Frame":
+        parent_t = self._get_parent_frame_t(target)
+        pos_from_target = (parent_t @ self.transform).translation + delta
+        local_pos = parent_t.inverse() @ Transform.create(translation=pos_from_target)
+        self.set_local_origin(local_pos.translation)
+        return self
+
+    def _get_parent_frame_t(self, target: "Frame | None" = None) -> Transform:
+        node_not_parent = True
+        node = self
+        while node is not None:
+            if node is target:
+                node_not_parent = False
+            node = node.parent
+
+        if target and node_not_parent:
+            raise RuntimeError("Could not find target in parent node tree.")
+
+        node = self.parent
+        transform = Transform.create()
+
+        if self is target:
+            return transform
+
+        while node is not None:
+            transform = node.transform @ transform
+            if node is target:
+                break
+            node = node.parent
+
+        return transform
