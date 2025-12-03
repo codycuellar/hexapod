@@ -1,29 +1,29 @@
 import math
-from hexapod.engine import Point
+from hexapod.engine import Vector
 
 
 def lerp(v1: float, v2: float, t: float):
     return v1 + (v2 - v1) * t
 
 
-def lerp_2d(p1: Point, p2: Point, t: float):
-    return Point(lerp(p1.x, p2.x, t), lerp(p1.y, p2.y, t))
+def lerp_2d(p1: Vector, p2: Vector, t: float):
+    return Vector(lerp(p1.x, p2.x, t), lerp(p1.y, p2.y, t))
 
 
-def lerp_3d(p1: Point, p2: Point, t: float):
-    return Point(lerp(p1.x, p2.x, t), lerp(p1.y, p2.y, t), lerp(p1.z, p2.z, t))
+def lerp_3d(p1: Vector, p2: Vector, t: float):
+    return Vector(lerp(p1.x, p2.x, t), lerp(p1.y, p2.y, t), lerp(p1.z, p2.z, t))
 
 
 def quad_bez(v1: float, v2: float, v3: float, t: float):
     return lerp(lerp(v1, v2, t), lerp(v2, v3, t), t)
 
 
-def quad_bez_2d(p1: Point, p2: Point, p3: Point, t: float):
-    return Point(quad_bez(p1.x, p2.x, p3.x, t), quad_bez(p1.y, p2.y, p3.y, t))
+def quad_bez_2d(p1: Vector, p2: Vector, p3: Vector, t: float):
+    return Vector(quad_bez(p1.x, p2.x, p3.x, t), quad_bez(p1.y, p2.y, p3.y, t))
 
 
-def quad_bez_3d(p1: Point, p2: Point, p3: Point, t: float):
-    return Point(
+def quad_bez_3d(p1: Vector, p2: Vector, p3: Vector, t: float):
+    return Vector(
         quad_bez(p1.x, p2.x, p3.x, t),
         quad_bez(p1.y, p2.y, p3.y, t),
         quad_bez(p1.z, p2.z, p3.z, t),
@@ -47,18 +47,18 @@ def cubic_bez(
 
 
 def cubic_bez_2d(
-    p1: Point, p2: Point, p3: Point, p4: Point, t: float, style="decasteljau"
+    p1: Vector, p2: Vector, p3: Vector, p4: Vector, t: float, style="decasteljau"
 ):
-    return Point(
+    return Vector(
         cubic_bez(p1.x, p2.x, p3.x, p4.x, t, style),
         cubic_bez(p1.y, p2.y, p3.y, p4.y, t, style),
     )
 
 
 def cubic_bez_3d(
-    p1: Point, p2: Point, p3: Point, p4: Point, t: float, style="decasteljau"
+    p1: Vector, p2: Vector, p3: Vector, p4: Vector, t: float, style="decasteljau"
 ):
-    return Point(
+    return Vector(
         cubic_bez(p1.x, p2.x, p3.x, p4.x, t, style),
         cubic_bez(p1.y, p2.y, p3.y, p4.y, t, style),
         cubic_bez(p1.z, p2.z, p3.z, p4.z, t, style),

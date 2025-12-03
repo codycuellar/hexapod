@@ -6,12 +6,10 @@ class Matrix:
     a mutable structure tied to other code.
     """
 
-    @staticmethod
-    def identity(size: int) -> "Matrix":
+    @classmethod
+    def identity(cls, size: int) -> "Matrix":
         """Create an identity matrix of given size (N, N)."""
-        return Matrix(
-            [[1.0 if i == j else 0.0 for j in range(size)] for i in range(size)]
-        )
+        return cls([[1.0 if i == j else 0.0 for j in range(size)] for i in range(size)])
 
     def __init__(self, data: float | list[float] | list[list[float]]):
         """
@@ -125,7 +123,31 @@ class Matrix:
 
         a_cols = self.ncols()
         b_rows = other.nrows()
+        b_cols = other.ncols()
 
+        # Handle Matrix @ Vector: Vector is stored as row (1 x N) but should be treated as column (N x 1)
+        # Since .T is a no-op for 1-D, we manually treat the vector as a column
+        if a_ndim == 2 and b_ndim == 1:
+            # Matrix @ Vector: treat vector as column and multiply
+            if a_cols != b_cols:
+                raise ValueError(
+                    f"Cannot multiply matrix by vector: {a_cols} cols in matrix != {b_cols} elements in vector"
+                )
+            # Multiply matrix by vector (treating vector as column)
+            result = [[0.0] for _ in range(self.nrows())]
+            for i in range(self.nrows()):
+                s = 0.0
+                for k in range(a_cols):
+                    a_val = self._get_value(i, k)
+                    b_val = other._get_value(
+                        0, k
+                    )  # Vector is stored as row, get element k
+                    s += a_val * b_val
+                result[i][0] = s
+            # Return as 1-D (matching numpy behavior)
+            return Matrix([row[0] for row in result])
+
+        # Standard matrix multiplication dimension check
         if a_cols != b_rows:
             raise ValueError(
                 f"Cannot multiply matrices: {a_cols} cols in A != {b_rows} rows in B"
@@ -170,10 +192,8 @@ class Matrix:
         if self._ndim == 0:
             return self.copy()
         if self._ndim == 1:
-            # 1×N becomes N×1
-            new_data = [[self._data[0][i]] for i in range(len(self._data[0]))]
-            m = Matrix(new_data)
-            return m
+            # 1-D matrices: .T does nothing (matching numpy behavior)
+            return self
         # 2-D: swap rows/cols
         new_data = [
             [self._data[j][i] for j in range(len(self._data))]

@@ -1,6 +1,4 @@
 import math
-
-import hexapod.matmath as mm
 from hexapod.matmath import Matrix
 
 
@@ -29,7 +27,8 @@ class Vector(Matrix):
             if data.shape == (3,) or data.shape == (1, 3):
                 super().__init__(data._data[0])
             elif data.shape == (3, 1):
-                super().__init__(data.T._data[0])
+                # Extract column vector from (3,1) matrix
+                super().__init__([data._data[i][0] for i in range(3)])
             else:
                 raise ValueError(f"Input Matrix invalid shape. Received {data.shape}")
         else:
@@ -101,6 +100,9 @@ class Vector(Matrix):
                 f"Cannot normalize a zero-length vector with coordinates ({self.x}, {self.y}, {self.z})"
             )
         return self / self.length
+
+    def to_transform(self) -> "Transform":
+        return Transform.create(translation=self)
 
 
 class Rotation(Matrix):
@@ -178,14 +180,19 @@ class Rotation(Matrix):
     def __truediv__(self, _) -> "Vector":
         raise NotImplementedError("Rotation division is not defined.")
 
-    def __matmul__(self, other: "Rotation | Vector"):
+    def __matmul__(self, other: "Rotation | Vector | Matrix"):
         result = super().__matmul__(other)
         if isinstance(other, Rotation):
             return Rotation(result.as_list(copy=False))  # type: ignore
         elif isinstance(other, Vector):
             return Vector(result._get_row(0))
+        elif isinstance(other, Matrix):
+            return Rotation(result._data)
         else:
             raise TypeError(f"Cannot matmul Rotation with {type(other)}")
+
+    def to_transform(self) -> "Transform":
+        return Transform.create(rotation=self)
 
 
 class Transform(Matrix):
@@ -196,9 +203,9 @@ class Transform(Matrix):
     combining transformations, and applying them to 3D Points.
     """
 
-    @staticmethod
-    def identity():
-        return Transform(Matrix.identity(4))
+    @classmethod
+    def identity(cls, size=None):
+        return cls(Matrix.identity(4))
 
     @staticmethod
     def create(
@@ -260,13 +267,16 @@ class Transform(Matrix):
 
     @property
     def translation(self) -> Vector:
-        return Vector(self[0:3, 3].T)
+        # Extract column vector from transform matrix (3x1 slice)
+        col_slice = self[0:3, 3]
+        # Convert 2-D column (3x1) to 1-D vector by extracting elements
+        return Vector([col_slice._data[i][0] for i in range(3)])
 
     def rotate(self, rotation: Rotation) -> "Transform":
-        return self @ Transform.create(rotation=rotation)
+        return self @ rotation.to_transform()
 
     def translate(self, translation: Vector) -> "Transform":
-        return self @ Transform.create(translation=translation)
+        return self @ translation.to_transform()
 
     def inverse(self) -> "Transform":
         rot_inv = self.rotation.inverse()
@@ -337,7 +347,8 @@ class Frame:
         :return: The position of this frame's origin within in the target frame.
         """
         relative_t = self._get_transform_to(target)
-        return Vector(relative_t @ Transform.create(translation=self.origin))
+        pos = relative_t @ self.origin.to_transform()
+        return pos.translation
 
     def to_local_position(
         self, position: Vector, target: "Frame | None" = None
@@ -349,8 +360,8 @@ class Frame:
         :param target: The target parent frame to calculate the relative position from.
         :return: The converted coordinate position
         """
-        relative_t_inv = self._get_transform_to(target).inverse()
-        pos_inv = relative_t_inv @ Transform.create(translation=position)
+        relative_t = self._get_transform_to(target) @ self.transform
+        pos_inv = relative_t.inverse() @ position.to_transform()
         return pos_inv.translation
 
     def to_frame_position(
@@ -362,8 +373,11 @@ class Frame:
         :param target: Description
         """
         relative_t = self._get_transform_to(target)
-        pos = relative_t @ Transform.create(translation=position)
+        pos = relative_t @ position.to_transform()
         return pos.translation
+
+    def copy(self):
+        return Frame(self.origin, self.rotation)
 
     def _get_transform_to(self, target: "Frame | None" = None) -> Transform:
         """

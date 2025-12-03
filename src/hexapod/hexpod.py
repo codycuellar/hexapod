@@ -1,7 +1,6 @@
 import math
 
 from hexapod.engine import Frame, Transform, Vector, Rotation
-from hexapod.joint_control import RawJointControl
 from enum import Enum
 
 
@@ -15,131 +14,190 @@ class LegID(Enum):
 
 
 class Body:
-    def __init__(self, frame: Frame, legs: dict[LegID, "Leg"]):
-        """legs are ordered in right front, clockwise around the body."""
+    def __init__(
+        self,
+        frame: Frame,
+        legs: dict[LegID, "Leg"],
+    ):
+        """
+        Initialize the hexapod body.
+
+        :param frame: Body coordinate frame
+        :param legs: Dictionary of legs by LegID
+        :param home_position: Home position for body (optional)
+        :param home_rotation: Home rotation for body (optional)
+        """
         self.frame = frame
-
-        for key in legs:
-            legs[key].frame.parent = frame
-
         self.legs = legs
-        self.foot_frames = self._set_foot_frames(legs)
 
-    def go_to_home(self):
+        for key in self.legs:
+            self.legs[key].coxa.frame.parent = self.frame
+
+    def set_foot_position(self, leg_id: LegID, position: Vector):
         """
-        When powered on, leg positions cannot accurately be read if they
-        have been physically moved, so this assumes the body is in contact with
-        the ground, and we can home the legs to a known position off the ground.
-        This will happen as fast as the servos can move, so it's the safest way to
-        initialize known positions.
+        Set foot position for a specific leg.
+        Position is in body-relative coordinates.
         """
-        pass
+        leg = self.legs[leg_id]
+        # Convert body-relative position to leg-relative (coxa frame)
+        leg_local_pos = leg.frame.to_local_position(position, self.frame)
+        leg.set_foot_pos(leg_local_pos)
 
-    def update(self):
-        pass
-
-    def update_velocity(self, velocity: Vector):
-        self.current_velocity = velocity.normalize()
-
-    def change_gait(self, gait=None):
+    def get_foot_position(self, leg_id: LegID) -> Vector:
         """
-        Change the gait of the hexapod. If no gait is specified, it will cycle to the next one.
-        param gait: The name of the gait to switch to from Body.gaits.
-                    If None, cycles to the next gait.
+        Get current foot position in body-relative coordinates.
         """
-        if gait is None:
-            next_gait = (self.gaits.index(self.current_gait) + 1) % len(self.gaits)
-            self.current_gait = self.gaits[next_gait]
+        leg = self.legs[leg_id]
+        # Get foot position in world/body frame
+        return leg.foot_frame.get_position_in_frame(self.frame)
 
-        if gait not in self.gaits:
-            raise ValueError(f"Gait {gait} not found.")
-
-        self.current_gait = gait
-
-    def _set_foot_frames(self, legs: dict[str, Leg]):
-        foot_frames = {}
-        for name, leg in legs.items():
-            leg.change_global_position(self.relative_position)
-            base = leg.pos_from_global
-            offset = leg.coxa_len + (leg.femur_len + leg.tib_len) / 2
-            foot_frames[name] = (
-                base.position() + base.translation().normalize() * offset
-            )
-        return foot_frames
-
-    def _move(self, t: float):
-        if self.current_gait == "tripod":
-            self._tripod_gait(t)
-        else:
-            raise ValueError(f"Gait {self.current_gait} not implemented.")
-
-    def _tripod_gait(self, t: float):
-        """
-        Move the hexapod in a tripod gait pattern.
-        """
-        pass
+    def update_all(self):
+        """Update all leg controllers."""
+        for leg in self.legs.values():
+            leg.update()
 
 
 class Joint:
-    def __init__(self, frame: Frame, control: RawJointControl, length_to_child: float):
-        super().__init__()
-        self.frame = frame
+    def __init__(
+        self,
+        control,  # Any object with set_angle() and update() methods
+        length_to_child: float,
+    ):
+        self.frame = Frame()
         self.control = control
         self.length_to_child = length_to_child
+
+    def set_angle(self, frame_angle: float):
+        """
+        Set the joint angle. Updates both control and frame.
+        :param frame_angle: Angle in frame space (degrees).
+        """
+        # Update control
+        self.control.set_angle(frame_angle)
+
+    def get_angle(self) -> float:
+        """Get current joint angle in frame space."""
+        return self.control.get_frame_angle()
+
+    # def sync_from_control(self):
+    #     """
+    #     Sync frame to match current control position.
+    #     Reads raw control angle, converts to frame angle, updates frame only.
+    #     Use this on startup to align frames with actual control positions.
+    #     Does not modify the control - it already has the correct value.
+    #     """
+    #     # Read raw control angle
+    #     raw_angle = self.control.get_control_angle()
+
+    #     # Convert to frame angle
+    #     # For Servo: raw_angle is servo angle, needs conversion
+    #     # For MockControl: raw_angle is already frame angle (get_control_angle returns frame_angle)
+    #     if hasattr(self.control, 'cluster'):
+    #         # It's a Servo - convert servo angle to frame angle
+    #         frame_angle = self.control.calibration.servo_to_frame_angle(raw_angle)
+    #     else:
+    #         # It's a MockControl - raw_angle is already frame angle
+    #         frame_angle = raw_angle
+
+    #     # Update frame to match (don't update control - it already has this value)
+    #     self._update_frame_from_angle(frame_angle)
+
+    #     # Also update control's frame_angle to match (for consistency)
+    #     self.control.frame_angle = frame_angle
+
+    def update(self):
+        """
+        Update hardware to match current angle, and ensure frame matches.
+        This is called to send commands to hardware.
+        """
+        # Get current angle from control
+        current_angle = self.control.get_frame_angle()
+
+        # # Ensure frame matches (in case it was modified externally)
+        # self._update_frame_from_angle(current_angle)
+
+        # Send to hardware
+        self.control.update()
+
+    # def _update_frame_from_angle(self, angle: float):
+    #     """Update frame rotation based on current angle and rotation axis."""
+    #     # For mount frames, we need to preserve the mount rotation and compose the joint rotation
+    #     # For non-mount frames, we just set the rotation directly
+    #     if self.is_mount_frame and self._mount_base_rotation is not None:
+    #         # Mount frame: compose mount base rotation with joint rotation
+    #         if self.rotation_axis == "X":
+    #             joint_rot = Rotation.degrees(angle, 0, 0)
+    #         elif self.rotation_axis == "Y":
+    #             joint_rot = Rotation.degrees(0, angle, 0)
+    #         elif self.rotation_axis == "Z":
+    #             joint_rot = Rotation.degrees(0, 0, angle)
+    #         else:
+    #             raise ValueError(f"Invalid rotation_axis: {self.rotation_axis}")
+    #         # Compose: mount_base_rotation @ joint_rotation
+    #         self.frame.rotation = self._mount_base_rotation @ joint_rot
+    #     else:
+    #         # Non-mount frame or mount rotation not set yet: just set the rotation directly
+    #         if self.rotation_axis == "X":
+    #             self.frame.rotation = Rotation.degrees(angle, 0, 0)
+    #         elif self.rotation_axis == "Y":
+    #             self.frame.rotation = Rotation.degrees(0, angle, 0)
+    #         elif self.rotation_axis == "Z":
+    #             self.frame.rotation = Rotation.degrees(0, 0, angle)
+    #         else:
+    #             raise ValueError(f"Invalid rotation_axis: {self.rotation_axis}")
+
+    #     # Update origin (joint extends along X axis)
+    #     # Don't set origin for mount frames (coxa) - they already have the correct mount position
+    #     if not self.is_mount_frame:
+    #         self.frame.origin = Vector([self.length_to_child, 0, 0])
 
 
 class Leg:
     def __init__(
-        self,
-        id: LegID,
-        frame: Frame,
-        coxa: Joint,
-        femur: Joint,
-        tibia: Joint,
+        self, id: LegID, coxa: Joint, femur: Joint, tibia: Joint, mount_frame: Frame
     ):
-        """
-        Initialize the leg with servo pin numbers for each joint (coxa, femur, tibia). Offsets
-        specify the angle of the Pointinate plane relative to the body and ground plane when
-        the servo is zeroed out on a scale of -90 to 90.
-        """
         self.id = id
-        self.frame = frame
-
+        self.name = LegID(id)
         self.coxa = coxa
         self.femur = femur
         self.tibia = tibia
-        self.foot = (
-            Frame()
-        )  # how do we know where this is initially based on the angles and lengths of components?
-        self.coxa.frame.parent = self.frame
+
+        self.femur.frame.origin = Vector([self.coxa.length_to_child, 0, 0])
+        self.tibia.frame.origin = Vector([self.femur.length_to_child, 0, 0])
+        self.foot_frame = Frame(origin=Vector([self.tibia.length_to_child, 0, 0]))
+
+        self.coxa.frame = mount_frame
         self.femur.frame.parent = self.coxa.frame
         self.tibia.frame.parent = self.femur.frame
-        self.foot.parent = self.tibia.frame
+        self.foot_frame.parent = self.tibia.frame
+
+    @property
+    def frame(self) -> Frame:
+        return self.coxa.frame
+
+    @frame.setter
+    def frame(self, value: Frame):
+        self.coxa.frame = value
+        self.femur.frame.parent = self.coxa.frame
 
     def set_foot_pos(self, position: Vector):
-        foot_local = self.foot.to_local_position(position, self.coxa.frame)
-
+        """
+        Set the foot position relative to the leg's coxa frame.
+        :param position: Position vector in the coxa frame's coordinate system.
+        """
+        # Calculate IK angles for the desired position
         angles = self._calculate_ik(position)
-        self._set_servo_angles(*angles)
-        self._update()
 
-    def set_angles(self, s1, s2, s3):
-        if self.enabled == False:
-            return
-        self.coxa.control.set_angle(s1)
-        self.femur.control.set_angle(s2)
-        self.tibia.control.set_angle(s3)
+        # Set joint angles - Joint.set_angle() handles both frame and control
+        self.coxa.set_angle(angles[0])
+        self.femur.set_angle(angles[1])
+        self.tibia.set_angle(angles[2])
 
-    def enable(self):
-        self.enabled = True
-
-    def disable(self):
-        self.enabled = False
-
-    def zero_servos(self):
-        if self.enabled == False:
-            return
-        self._set_servo_angles(0, 0, 0)
+    def update(self):
+        """Update all joint controllers (send commands to hardware)."""
+        self.coxa.update()
+        self.femur.update()
+        self.tibia.update()
 
     def _calculate_ik(self, position: Vector) -> tuple[float, float, float]:
         """
@@ -154,34 +212,21 @@ class Leg:
 
         xyH = max(0, math.sqrt(position.y**2 + position.x**2) - cox_len)
         zH = math.sqrt(position.z**2 + xyH**2)
-        if (fem_len + tib_len) <= zH:
-            raise ValueError(f"Reach distance {zH} exceeds femur + tibia length.")
+
+        reach_distance = fem_len + tib_len + 1e-6
+        if reach_distance < zH:
+            raise ValueError(
+                f"Reach distance {zH:.6f} exceeds femur + tibia length {reach_distance:.6f}."
+            )
+
         z_theta = math.atan2(position.z, xyH)
         a2cos = (fem_len**2 + zH**2 - tib_len**2) / (2 * fem_len * zH)
+        a2cos = max(-1.0, min(1.0, a2cos))
+
         a2 = math.degrees(math.acos(a2cos) + z_theta)
 
-        a3 = math.degrees(
-            math.acos((fem_len**2 + tib_len**2 - zH**2) / (2 * tib_len * fem_len))
-        )
+        a3cos = (fem_len**2 + tib_len**2 - zH**2) / (2 * tib_len * fem_len)
+        a3cos = max(-1.0, min(1.0, a3cos))
+        a3 = math.degrees(math.acos(a3cos))
 
         return (a1, a2, a3)
-
-    def _clamp(self, value, min_val, max_val):
-        """Ensures the servo stays within it's calibrated limits."""
-        return max(min(value, max_val), min_val)
-
-    def _set_servo_angles(self, ca, fa, ta):
-        """Convert IK angles to raw angle positions and update the servo."""
-        # s1 = self.coxa.control.get_raw_value(a1)
-        # s2 = self.femur.control.get_raw_value(a2)
-        # s3 = self.tibia.control.get_raw_value(a3)
-        return (
-            self.coxa.control.set_angle(ca),
-            self.femur.control.set_angle(fa),
-            self.tibia.control.set_angle(ta),
-        )
-
-    def _update(self):
-        self.coxa.control.update()
-        self.femur.control.update()
-        self.tibia.control.update()
