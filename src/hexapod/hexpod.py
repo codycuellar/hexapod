@@ -24,8 +24,6 @@ class Body:
 
         :param frame: Body coordinate frame
         :param legs: Dictionary of legs by LegID
-        :param home_position: Home position for body (optional)
-        :param home_rotation: Home rotation for body (optional)
         """
         self.frame = frame
         self.legs = legs
@@ -61,9 +59,11 @@ class Joint:
     def __init__(
         self,
         control,  # Any object with set_angle() and update() methods
+        joint_axis: str,
         length_to_child: float,
     ):
         self.frame = Frame()
+        self.joint_axis = joint_axis
         self.control = control
         self.length_to_child = length_to_child
 
@@ -73,6 +73,10 @@ class Joint:
         :param frame_angle: Angle in frame space (degrees).
         """
         # Update control
+        x = frame_angle if self.joint_axis == "x" else 0.0
+        y = frame_angle if self.joint_axis == "y" else 0.0
+        z = frame_angle if self.joint_axis == "z" else 0.0
+        self.frame.rotate_local(Rotation.degrees(x, y, z))
         self.control.set_angle(frame_angle)
 
     def get_angle(self) -> float:
@@ -188,16 +192,49 @@ class Leg:
         # Calculate IK angles for the desired position
         angles = self._calculate_ik(position)
 
-        # Set joint angles - Joint.set_angle() handles both frame and control
+        # Set joint angles and update frames
         self.coxa.set_angle(angles[0])
         self.femur.set_angle(angles[1])
         self.tibia.set_angle(angles[2])
+
+        # # Update frame rotations and origins based on angles
+        # self._update_frames_from_angles()
 
     def update(self):
         """Update all joint controllers (send commands to hardware)."""
         self.coxa.update()
         self.femur.update()
         self.tibia.update()
+
+    # def _update_frames_from_angles(self):
+    #     """Update frame rotations based on current joint angles."""
+    #     # Update coxa frame rotation (rotate around Z axis)
+    #     coxa_angle = self.coxa.get_angle()
+    #     # Get mount rotation (stored when frame was set)
+    #     if hasattr(self.coxa, "_mount_base_rotation"):
+    #         mount_rot = self.coxa._mount_base_rotation
+    #     else:
+    #         # Store mount rotation if not already stored
+    #         self.coxa._mount_base_rotation = self.coxa.frame.rotation
+    #         mount_rot = self.coxa.frame.rotation
+    #     # Compose mount rotation with coxa joint rotation
+    #     joint_rot = Rotation.degrees(0, 0, coxa_angle)
+    #     self.coxa.frame.rotation = mount_rot @ joint_rot
+
+    #     # Update femur frame (rotate around Y axis)
+    #     femur_angle = self.femur.get_angle()
+    #     self.femur.frame.rotation = Rotation.degrees(0, femur_angle, 0)
+    #     # Origin is in parent's local coordinates (doesn't change with rotation)
+    #     self.femur.frame.origin = Vector([self.coxa.length_to_child, 0, 0])
+
+    #     # Update tibia frame (rotate around Y axis)
+    #     tibia_angle = self.tibia.get_angle()
+    #     self.tibia.frame.rotation = Rotation.degrees(0, tibia_angle, 0)
+    #     # Origin is in parent's local coordinates
+    #     self.tibia.frame.origin = Vector([self.femur.length_to_child, 0, 0])
+
+    #     # Update foot frame (no rotation, just position)
+    #     self.foot_frame.origin = Vector([self.tibia.length_to_child, 0, 0])
 
     def _calculate_ik(self, position: Vector) -> tuple[float, float, float]:
         """
@@ -213,11 +250,26 @@ class Leg:
         xyH = max(0, math.sqrt(position.y**2 + position.x**2) - cox_len)
         zH = math.sqrt(position.z**2 + xyH**2)
 
-        reach_distance = fem_len + tib_len + 1e-6
-        if reach_distance < zH:
-            raise ValueError(
-                f"Reach distance {zH:.6f} exceeds femur + tibia length {reach_distance:.6f}."
-            )
+        max_reach = fem_len + tib_len
+        # Clamp reach distance to maximum if it exceeds (with small tolerance)
+        if zH > max_reach + 1e-6:
+            # Scale the position vector to be within reach
+            # Keep the direction, just reduce the magnitude
+            position_mag = math.sqrt(position.x**2 + position.y**2 + position.z**2)
+            if position_mag > 0:
+                # Calculate what the max reachable distance is from coxa
+                max_position_mag = cox_len + max_reach
+                scale_factor = max_position_mag / position_mag
+                position = Vector(
+                    [
+                        position.x * scale_factor,
+                        position.y * scale_factor,
+                        position.z * scale_factor,
+                    ]
+                )
+                # Recalculate after scaling
+                xyH = max(0, math.sqrt(position.y**2 + position.x**2) - cox_len)
+                zH = math.sqrt(position.z**2 + xyH**2)
 
         z_theta = math.atan2(position.z, xyH)
         a2cos = (fem_len**2 + zH**2 - tib_len**2) / (2 * fem_len * zH)
