@@ -8,10 +8,8 @@ The controller's job is to:
 4. Coordinate leg movements over time
 """
 
-import math
 from hexapod.hexpod import Body, LegID
-from hexapod.engine import Vector
-from hexapod.interpolation import lerp, cosine_ease_t
+from hexapod.engine import Vec3d
 
 
 class HexapodController:
@@ -26,16 +24,16 @@ class HexapodController:
         """
         self.body = body
         self.current_gait = "tripod"
-        self.velocity = Vector([0, 0, 0])  # Body-relative velocity (x, y, z)
-        self.rotation = Vector([0, 0, 0])  # Body rotation rates (roll, pitch, yaw)
+        self.velocity = Vec3d.zero()  # Body-relative velocity (x, y, z)
+        self.rotation = Vec3d.zero()  # Body rotation rates (roll, pitch, yaw)
 
         # Gait timing
         self.gait_phase = 0.0  # 0.0 to 1.0, cycles through gait pattern
         self.gait_speed = 1.0  # Multiplier for gait cycle speed
 
         # These will be initialized by initialize()
-        self.default_foot_positions: dict[LegID, Vector] = {}
-        self.target_foot_positions: dict[LegID, Vector] = {}
+        self.default_foot_positions: dict[LegID, Vec3d] = {}
+        self.target_foot_positions: dict[LegID, Vec3d] = {}
 
     def initialize(self):
         """
@@ -46,11 +44,11 @@ class HexapodController:
             leg = self.body.legs[id]
             leg.tibia.set_angle(90)
 
-    def set_velocity(self, velocity: Vector):
+    def set_velocity(self, velocity: Vec3d):
         """Set desired body-relative velocity."""
         self.velocity = velocity
 
-    def set_rotation(self, rotation: Vector):
+    def set_rotation(self, rotation: Vec3d):
         """Set desired body rotation rates (roll, pitch, yaw in deg/s)."""
         self.rotation = rotation
 
@@ -120,12 +118,10 @@ class HexapodController:
             base_pos = self.default_foot_positions[leg_id]
 
             # Forward movement based on velocity
-            forward_offset = Vector(
-                [
-                    self.velocity.x * dt * 1000,  # Convert m/s to mm/s
-                    self.velocity.y * dt * 1000,
-                    0,
-                ]
+            forward_offset = Vec3d(
+                self.velocity.x * dt * 1000,  # Convert m/s to mm/s
+                self.velocity.y * dt * 1000,
+                0,
             )
 
             # Trajectory: lift up, move forward, lower down
@@ -139,12 +135,10 @@ class HexapodController:
                 forward_progress = (swing_phase - 0.5) * 2.0
 
             # Move foot forward during swing
-            forward_move = Vector(
-                [
-                    forward_offset.x * forward_progress,
-                    forward_offset.y * forward_progress,
-                    -z_offset,
-                ]
+            forward_move = Vec3d(
+                forward_offset.x * forward_progress,
+                forward_offset.y * forward_progress,
+                -z_offset,
             )
 
             self.target_foot_positions[leg_id] = base_pos + forward_move
@@ -154,12 +148,10 @@ class HexapodController:
             base_pos = self.default_foot_positions[leg_id]
             backward_progress = swing_phase  # Move back as swing leg moves forward
 
-            backward_move = Vector(
-                [
-                    -self.velocity.x * dt * 1000 * backward_progress,
-                    -self.velocity.y * dt * 1000 * backward_progress,
-                    0,
-                ]
+            backward_move = Vec3d(
+                -self.velocity.x * dt * 1000 * backward_progress,
+                -self.velocity.y * dt * 1000 * backward_progress,
+                0,
             )
 
             self.target_foot_positions[leg_id] = base_pos + backward_move
@@ -179,12 +171,10 @@ class HexapodController:
                 # Support phase
                 base_pos = self.default_foot_positions[leg_id]
                 backward_progress = leg_phase * 2.0
-                backward_move = Vector(
-                    [
-                        -self.velocity.x * dt * 1000 * backward_progress,
-                        -self.velocity.y * dt * 1000 * backward_progress,
-                        0,
-                    ]
+                backward_move = Vec3d(
+                    -self.velocity.x * dt * 1000 * backward_progress,
+                    -self.velocity.y * dt * 1000 * backward_progress,
+                    0,
                 )
                 self.target_foot_positions[leg_id] = base_pos + backward_move
             else:
@@ -200,12 +190,10 @@ class HexapodController:
                     z_offset = step_height * (2.0 - swing_phase * 2.0)
                     forward_progress = (swing_phase - 0.5) * 2.0
 
-                forward_move = Vector(
-                    [
-                        self.velocity.x * dt * 1000 * forward_progress,
-                        self.velocity.y * dt * 1000 * forward_progress,
-                        -z_offset,
-                    ]
+                forward_move = Vec3d(
+                    self.velocity.x * dt * 1000 * forward_progress,
+                    self.velocity.y * dt * 1000 * forward_progress,
+                    -z_offset,
                 )
 
                 self.target_foot_positions[leg_id] = base_pos + forward_move

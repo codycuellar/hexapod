@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from hexapod.hexpod import Body, Leg, LegID, Joint
-from hexapod.engine import Frame, Vector, Rotation
+from hexapod.engine import Frame, Vec3d, Rotation
 from hexapod.servos import MockServo
 from hexapod.controller import HexapodController
 
@@ -25,7 +25,7 @@ def create_simulation_hexapod() -> Body:
 
     LEG_MOUNT_ROTATION = Rotation.degrees(0, 0, 60.0)  # LM base position
     origin = Frame()
-    mount_frame = Frame(origin=Vector([100.0, 0, 0]))
+    mount_frame = Frame(origin=Vec3d(100.0, 0, 0))
     mount_frame.parent = origin
     legs = {}
     ids = [LegID.RM, LegID.RF, LegID.LF, LegID.LM, LegID.LR, LegID.RR]
@@ -43,7 +43,7 @@ def create_simulation_hexapod() -> Body:
         mount_frame.rotate_local(LEG_MOUNT_ROTATION)
 
     # Create body
-    body_frame = Frame(origin=Vector([0, 0, 80]), rotation=Rotation())
+    body_frame = Frame(origin=Vec3d(0, 0, 80))
     body = Body(body_frame, legs)
     return body
 

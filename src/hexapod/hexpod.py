@@ -1,6 +1,6 @@
 import math
 
-from hexapod.engine import Frame, Transform, Vector, Rotation
+from hexapod.engine import Frame, Transform, Vec3d, Rotation
 from enum import Enum
 
 
@@ -31,7 +31,7 @@ class Body:
         for key in self.legs:
             self.legs[key].coxa.frame.parent = self.frame
 
-    def set_foot_position(self, leg_id: LegID, position: Vector):
+    def set_foot_position(self, leg_id: LegID, position: Vec3d):
         """
         Set foot position for a specific leg.
         Position is in body-relative coordinates.
@@ -41,7 +41,7 @@ class Body:
         leg_local_pos = leg.frame.to_local_position(position, self.frame)
         leg.set_foot_pos(leg_local_pos)
 
-    def get_foot_position(self, leg_id: LegID) -> Vector:
+    def get_foot_position(self, leg_id: LegID) -> Vec3d:
         """
         Get current foot position in body-relative coordinates.
         """
@@ -166,9 +166,9 @@ class Leg:
         self.femur = femur
         self.tibia = tibia
 
-        self.femur.frame.origin = Vector([self.coxa.length_to_child, 0, 0])
-        self.tibia.frame.origin = Vector([self.femur.length_to_child, 0, 0])
-        self.foot_frame = Frame(origin=Vector([self.tibia.length_to_child, 0, 0]))
+        self.femur.frame.origin = Vec3d([self.coxa.length_to_child, 0, 0])
+        self.tibia.frame.origin = Vec3d([self.femur.length_to_child, 0, 0])
+        self.foot_frame = Frame(origin=Vec3d([self.tibia.length_to_child, 0, 0]))
 
         self.coxa.frame = mount_frame
         self.femur.frame.parent = self.coxa.frame
@@ -184,7 +184,7 @@ class Leg:
         self.coxa.frame = value
         self.femur.frame.parent = self.coxa.frame
 
-    def set_foot_pos(self, position: Vector):
+    def set_foot_pos(self, position: Vec3d):
         """
         Set the foot position relative to the leg's coxa frame.
         :param position: Position vector in the coxa frame's coordinate system.
@@ -236,7 +236,7 @@ class Leg:
     #     # Update foot frame (no rotation, just position)
     #     self.foot_frame.origin = Vector([self.tibia.length_to_child, 0, 0])
 
-    def _calculate_ik(self, position: Vector) -> tuple[float, float, float]:
+    def _calculate_ik(self, position: Vec3d) -> tuple[float, float, float]:
         """
         Calculates the angles from the leg hip joint to the tip point in 3d space,
         with x axis being parallel to the ground plane, perpindicular to the mount point.
@@ -260,7 +260,7 @@ class Leg:
                 # Calculate what the max reachable distance is from coxa
                 max_position_mag = cox_len + max_reach
                 scale_factor = max_position_mag / position_mag
-                position = Vector(
+                position = Vec3d(
                     [
                         position.x * scale_factor,
                         position.y * scale_factor,

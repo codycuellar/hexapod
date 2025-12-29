@@ -1,107 +1,59 @@
 import math
-from hexapod.matmath import Matrix
+from typing import overload
+
+from hexapod.matmath import Vector, Matrix
 
 
-class Vector(Matrix):
-    """
-    A 3D Vector which represents motion or translation in space, as well as generic 3D
-    positions in space.
-    """
+class Vec3d(Vector):
+    @staticmethod
+    def zero():
+        return Vec3d(0, 0, 0)
 
-    def __init__(self, data: list[float] | Matrix | None = None):
-        """
-        Initialize a vector using any data type representing a vector of 3 items.
-        It can be:
-          - [f, f, f]
-          - [[f], [f], [f]]
-          - Matrix(3,)
-          - Matrix(3,1)
-          - Matrix(1, 3)
-        :param self: Description
-        :param data: Description
-        :type data: list[float] | Matrix | None
-        """
-        if data is None:
-            super().__init__([0.0, 0.0, 0.0])
-        elif isinstance(data, Matrix):
-            if data.shape == (3,) or data.shape == (1, 3):
-                super().__init__(data._data[0])
-            elif data.shape == (3, 1):
-                # Extract column vector from (3,1) matrix
-                super().__init__([data._data[i][0] for i in range(3)])
-            else:
-                raise ValueError(f"Input Matrix invalid shape. Received {data.shape}")
-        else:
-            if len(data) != 3:
-                raise ValueError("Vector list must contain 3 elements.")
-            super().__init__(data)
+    def __init__(self, x: float, y: float, z: float):
+        return super().__init__([x, y, z])
 
-    def __add__(self, other) -> "Vector":
-        return Vector(super().__add__(other))
+    def __add__(self, other: "Vec3d") -> "Vec3d":
+        return Vec3d(*super().__add__(other)._data)
 
-    def __sub__(self, other) -> "Vector":
-        return Vector(super().__sub__(other))
+    def __sub__(self, other: "Vec3d") -> "Vec3d":
+        self._ensure_len_eq(other)
+        return Vec3d(*super().__sub__(other)._data)
 
-    def __mul__(self, scalar: float) -> "Vector":
-        return Vector(super().__mul__(scalar))
+    def __mul__(self, scalar: float) -> "Vec3d":
+        return Vec3d(*super().__mul__(scalar)._data)
 
-    def __truediv__(self, scalar: float) -> "Vector":
-        return Vector(super().__truediv__(scalar))
+    def __truediv__(self, scalar: float) -> "Vec3d":
+        return Vec3d(*super().__truediv__(scalar)._data)
 
-    def __matmul__(self, other: "Vector") -> float:
-        result = super().__matmul__(other)
-        return result._data[0][0]
+    def __neg__(self):
+        return Vec3d(*super().__neg__()._data)
 
     @property
-    def length(self) -> float:
-        """Calculate the magnitude (length) of the vector."""
-        return math.sqrt(self.x**2 + self.y**2 + self.z**2)
+    def x(self):
+        return self[0]
 
     @property
-    def x(self) -> float:
-        """Get the x component of the vector."""
-        return self._get_value(0, 0)
+    def y(self):
+        return self[1]
 
     @property
-    def y(self) -> float:
-        """Get the y component of the vector."""
-        return self._get_value(0, 1)
+    def z(self):
+        return self[2]
 
-    @property
-    def z(self) -> float:
-        """Get the z component of the vector."""
-        return self._get_value(0, 2)
-
-    def cross(self, vec: "Vector") -> "Vector":
-        """
-        Get the cross product of another vector and this vector.
-        :param vec: The vector to multiply.
-        :return: The cross product Vector.
-        :raises TypeError: TypeError if a non-vector is passed.
-        """
-        if not isinstance(vec, Vector):
-            raise TypeError("Operand must be an instance of Vector")
-        return Vector(
-            [
-                self.y * vec.z - self.z * vec.y,
-                self.z * vec.x - self.x * vec.z,
-                self.x * vec.y - self.y * vec.x,
-            ]
+    def cross(self, other: "Vec3d"):
+        return Vec3d(
+            self[1] * other[2] - self[2] * other[1],
+            self[2] * other[0] - self[0] * other[2],
+            self[0] * other[1] - self[1] * other[0],
         )
 
-    def normalize(self) -> "Vector":
-        """
-        Normalize the vector to a unit vector with magnitude equal to 1.
-        :return: A new normalized Vector instance.
-        :raises ValueError: ValueError if the vector has zero length.
-        """
-        if self.length == 0:
-            raise ValueError(
-                f"Cannot normalize a zero-length vector with coordinates ({self.x}, {self.y}, {self.z})"
-            )
-        return self / self.length
+    def normalize(self) -> "Vec3d":
+        l = self.length()
+        if l == 0:
+            return Vec3d(0, 0, 0)
+        return Vec3d(*(self * (1 / l)))
 
-    def to_transform(self) -> "Transform":
+    def to_transform(self):
         return Transform.create(translation=self)
 
 
@@ -110,6 +62,11 @@ class Rotation(Matrix):
     A 3D rotation matrix for rotation about each axis. Rotations are specified in
     the xyz order.
     """
+
+    @staticmethod
+    def identity() -> "Rotation":
+        """Always returns a 3x3 identity rotation matrix."""
+        return Rotation([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
 
     @staticmethod
     def degrees(x_deg: float, y_deg: float, z_deg: float) -> "Rotation":
@@ -156,40 +113,28 @@ class Rotation(Matrix):
             ]
         )
 
-    def __init__(self, data: list[list[float]] | Matrix | None = None):
-        if data is None:
-            super().__init__(Matrix.identity(3).as_list(copy=False))
-        elif isinstance(data, Matrix):
-            if data.shape != (3, 3):
-                raise ValueError("Matrix must be of shape (3,3) to convert to Matrix.")
-            super().__init__(data._data)
+    def __init__(self, data: list[list[float]]):
+        if not (len(data) == 3 and len(data[0]) == 3):
+            # super's init ensures 3x3, so just need to check initial row here
+            raise ValueError("Rotation matrix must be of size 3x3")
+        super().__init__(data)
+
+    @overload
+    def __matmul__(self, other: "Rotation") -> "Rotation": ...
+    @overload
+    def __matmul__(self, other: Vec3d) -> Vec3d: ...
+    def __matmul__(self, other):
+        if isinstance(other, "Rotation"):
+            return Rotation(super().__matmul__(other).as_list())
         else:
-            if len(data) != 3 and len(data[0]) != 3:
-                raise ValueError("Matrix must be initialized with a 3x3 list.")
-            super().__init__(data)
+            return Vec3d(*super().__matmul__(other).as_list())
 
-    def __add__(self, _) -> "Vector":
-        raise NotImplementedError("Rotation addition is not defined.")
+    @property
+    def T(self) -> "Rotation":
+        return Rotation(super().T.as_list())
 
-    def __sub__(self, _) -> "Vector":
-        raise NotImplementedError("Rotation subtraction is not defined.")
-
-    def __mul__(self, _) -> "Vector":
-        raise NotImplementedError("Rotation multiplication is not defined.")
-
-    def __truediv__(self, _) -> "Vector":
-        raise NotImplementedError("Rotation division is not defined.")
-
-    def __matmul__(self, other: "Rotation | Vector | Matrix"):
-        result = super().__matmul__(other)
-        if isinstance(other, Rotation):
-            return Rotation(result.as_list(copy=False))  # type: ignore
-        elif isinstance(other, Vector):
-            return Vector(result._get_row(0))
-        elif isinstance(other, Matrix):
-            return Rotation(result._data)
-        else:
-            raise TypeError(f"Cannot matmul Rotation with {type(other)}")
+    def inverse(self) -> "Rotation":
+        return Rotation(super().inverse().as_list())
 
     def to_transform(self) -> "Transform":
         return Transform.create(rotation=self)
@@ -203,79 +148,54 @@ class Transform(Matrix):
     combining transformations, and applying them to 3D Points.
     """
 
-    @classmethod
-    def identity(cls, size=None):
-        return cls(Matrix.identity(4))
+    @staticmethod
+    def identity():
+        return Transform(Matrix.identity(4).as_list())
 
     @staticmethod
     def create(
-        rotation: "Rotation | Matrix | None" = None,
-        translation: "Vector | Matrix | None" = None,
+        rotation: Rotation | None = None,
+        translation: Vec3d | None = None,
     ) -> "Transform":
         # Build 4x4 homogeneous matrix
         if not isinstance(rotation, Rotation):
-            rotation = Rotation(rotation)
-        if not isinstance(translation, Vector):
-            translation = Vector(translation)
+            rotation = Rotation.identity()
+        if not isinstance(translation, Vec3d):
+            translation = Vec3d.zero()
 
         return Transform(Transform._combine_transforms(rotation, translation))
 
     @staticmethod
-    def _combine_transforms(rotation: Rotation, translation: Vector):
+    def _combine_transforms(rot: Rotation, trans: Vec3d):
         return [
-            [
-                rotation._get_value(0, 0),
-                rotation._get_value(0, 1),
-                rotation._get_value(0, 2),
-                translation.x,
-            ],
-            [
-                rotation._get_value(1, 0),
-                rotation._get_value(1, 1),
-                rotation._get_value(1, 2),
-                translation.y,
-            ],
-            [
-                rotation._get_value(2, 0),
-                rotation._get_value(2, 1),
-                rotation._get_value(2, 2),
-                translation.z,
-            ],
+            [rot[0, 0], rot[0, 1], rot[0, 2], trans.x],
+            [rot[1, 0], rot[1, 1], rot[1, 2], trans.y],
+            [rot[2, 0], rot[2, 1], rot[2, 2], trans.z],
             [0.0, 0.0, 0.0, 1.0],
         ]
 
-    def __init__(self, data: list[list[float]] | Matrix | None = None):
-        if data is None:
-            super().__init__(Transform._combine_transforms(Rotation(), Vector()))
-        elif isinstance(data, Matrix):
-            if data.shape != (4, 4):
-                raise ValueError(
-                    "Matrix must be of shape (4,4) to convert to Transform."
-                )
-            super().__init__(data._data)
-        else:
-            if len(data) != 4 or len(data[0]) != 4:
-                raise ValueError("Matrix must be initialized with a 4x4 list.")
-            super().__init__(data)
+    def __init__(self, data: list[list[float]]):
+        if len(data) != 4 or len(data[0]) != 4:
+            # super's init ensures 3x3, so just need to check initial row here
+            raise ValueError("Rotation matrix must be of size 4x4")
+        super().__init__(data)
 
     def __matmul__(self, other: "Transform") -> "Transform":
-        return Transform(super().__matmul__(other))
+        return Transform(super().__matmul__(other)._data)
 
     @property
     def rotation(self) -> Rotation:
-        return Rotation(self[:3, :3])
+        return Rotation([self.row(i).as_list() for i in range(3)])
 
     @property
-    def translation(self) -> Vector:
-        # Extract column vector from transform matrix (3x1 slice)
-        col_slice = self[0:3, 3]
-        # Convert 2-D column (3x1) to 1-D vector by extracting elements
-        return Vector([col_slice._data[i][0] for i in range(3)])
+    def translation(self) -> Vec3d:
+        vec = self.col(3)
+        return Vec3d(vec[0], vec[1], vec[2])
 
     def rotate(self, rotation: Rotation) -> "Transform":
         return self @ rotation.to_transform()
 
-    def translate(self, translation: Vector) -> "Transform":
+    def translate(self, translation: Vec3d) -> "Transform":
         return self @ translation.to_transform()
 
     def inverse(self) -> "Transform":
@@ -293,8 +213,8 @@ class Frame:
 
     def __init__(
         self,
-        origin: Vector = Vector(),
-        rotation: Rotation = Rotation(),
+        origin: Vec3d | None = None,
+        rotation: Rotation | None = None,
         parent: "Frame | None" = None,
     ):
         """
@@ -303,15 +223,17 @@ class Frame:
         :param parent: The parent frame of this frame. The only frame without a parennt
                        should be the world frame.
         """
-        self.transform: Transform = Transform.create(rotation, origin)
-        self.parent: "Frame | None" = parent
+        self._origin = origin or Vec3d.zero()
+        self.transform = Transform.create(rotation, origin)
+        self.parent = parent
 
     @property
     def origin(self):
-        return self.transform.translation
+        return self._origin
 
     @origin.setter
-    def origin(self, value: Vector):
+    def origin(self, value: Vec3d):
+        self._origin = value
         self.transform = Transform.create(self.transform.rotation, value)
 
     @property
@@ -322,7 +244,7 @@ class Frame:
     def rotation(self, rotation: Rotation):
         self.transform = Transform.create(rotation, self.transform.translation)
 
-    def move_local(self, delta: Vector) -> "Frame":
+    def move_local(self, delta: Vec3d) -> "Frame":
         """
         Update the frame origin by a delta.
         :param delta: The vector to move the frame origin by.
@@ -338,7 +260,7 @@ class Frame:
         self.transform = self.transform.rotate(delta)
         return self
 
-    def get_position_in_frame(self, target: "Frame | None" = None) -> Vector:
+    def get_position_in_frame(self, target: "Frame | None" = None) -> Vec3d:
         """
         Get this frame's origin position relative to a parent target. If no
         target is supplied, we traverse the parent tree to the top-most (usually
@@ -347,12 +269,12 @@ class Frame:
         :return: The position of this frame's origin within in the target frame.
         """
         relative_t = self._get_transform_to(target)
-        pos = relative_t @ self.origin.to_transform()
+        pos = relative_t @ self._origin.to_transform()
         return pos.translation
 
     def to_local_position(
-        self, position: Vector, target: "Frame | None" = None
-    ) -> Vector:
+        self, position: Vec3d, target: "Frame | None" = None
+    ) -> Vec3d:
         """
         Convert a position relative to a parent frame into local frame coordinate.
         :param position: The position relative to a parent frame to convert to this
@@ -364,9 +286,7 @@ class Frame:
         pos_inv = relative_t.inverse() @ position.to_transform()
         return pos_inv.translation
 
-    def to_frame_position(
-        self, position: Vector, target: "Frame|None" = None
-    ) -> Vector:
+    def to_frame_position(self, position: Vec3d, target: "Frame|None" = None) -> Vec3d:
         """
         Docstring for to_frame_position
         :param position: Description
