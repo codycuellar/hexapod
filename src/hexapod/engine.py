@@ -125,16 +125,16 @@ class Rotation(Matrix):
     def __matmul__(self, other: Vec3d) -> Vec3d: ...
     def __matmul__(self, other):
         if isinstance(other, "Rotation"):
-            return Rotation(super().__matmul__(other).as_list())
+            return Rotation(super().__matmul__(other).to_list())
         else:
             return Vec3d(*super().__matmul__(other).as_list())
 
     @property
     def T(self) -> "Rotation":
-        return Rotation(super().T.as_list())
+        return Rotation(super().T.to_list())
 
     def inverse(self) -> "Rotation":
-        return Rotation(super().inverse().as_list())
+        return Rotation(super().inverse().to_list())
 
     def to_transform(self) -> "Transform":
         return Transform.create(rotation=self)
@@ -150,7 +150,7 @@ class Transform(Matrix):
 
     @staticmethod
     def identity():
-        return Transform(Matrix.identity(4).as_list())
+        return Transform(Matrix.identity(4).to_list())
 
     @staticmethod
     def create(
@@ -180,17 +180,35 @@ class Transform(Matrix):
             raise ValueError("Rotation matrix must be of size 4x4")
         super().__init__(data)
 
-    def __matmul__(self, other: "Transform") -> "Transform":
-        return Transform(super().__matmul__(other)._data)
+    @overload
+    def __matmul__(self, other: "Transform") -> "Transform": ...
+    @overload
+    def __matmul__(self, other: Vec3d) -> Vec3d: ...
+    def __matmul__(self, other):
+        if isinstance(other, Transform):
+            return Transform(super().__matmul__(other)._data)
+        else:
+            vec = super().__matmul__(Vector(other.to_list() + [1.0]))
+            return Vec3d(*vec.to_list()[:3])
 
     @property
     def rotation(self) -> Rotation:
-        return Rotation([self.row(i).as_list() for i in range(3)])
+        return Rotation([self.row(i).to_list() for i in range(3)])
+
+    @rotation.setter
+    def rotation(self, rotation: Rotation):
+        for row in range(3):
+            for col in range(3):
+                self[row, col] = rotation[row, col]
 
     @property
     def translation(self) -> Vec3d:
-        vec = self.col(3)
-        return Vec3d(vec[0], vec[1], vec[2])
+        return Vec3d(*self.col(3).to_list())
+
+    @translation.setter
+    def translation(self, translation: Vec3d):
+        for i in range(3):
+            self._data[i][3] = translation[i]
 
     def rotate(self, rotation: Rotation) -> "Transform":
         return self @ rotation.to_transform()
@@ -213,109 +231,123 @@ class Frame:
 
     def __init__(
         self,
-        origin: Vec3d | None = None,
+        position: Vec3d | None = None,
         rotation: Rotation | None = None,
         parent: "Frame | None" = None,
     ):
         """
-        :param pos: The local position of the frame origin within the parent frame context.
-        :param rotation: The local rotation of the frame within the parent frame context.
-        :param parent: The parent frame of this frame. The only frame without a parennt
-                       should be the world frame.
+        :param origin:
+            The local position of the frame origin within the parent frame
+            context or relative to (0,0,0) if no parent.
+        :param rotation:
+            The local rotation of the frame within the parent frame context.
+        :param parent:
+            The parent frame of this frame. The only frame without a parennt
+            should be the world frame.
         """
-        self._origin = origin or Vec3d.zero()
-        self.transform = Transform.create(rotation, origin)
-        self.parent = parent
+        self._transform = Transform.create(rotation, position)
+        self._dirty = False  # if this frame or a parent has changed
+        self._parent: "Frame | None" = None
+        self._children: list[Frame] = []
+        if parent:
+            self.parent = parent
+        self._global_transform = self._get_global_transform()
+
+    def __repr__(self):
+        return f"<Frame origin={self.position} rotation={self.rotation} parent={self.parent is not None}>"
 
     @property
-    def origin(self):
-        return self._origin
+    def position(self):
+        return self._transform.translation
 
-    @origin.setter
-    def origin(self, value: Vec3d):
-        self._origin = value
-        self.transform = Transform.create(self.transform.rotation, value)
+    @position.setter
+    def position(self, value: Vec3d):
+        self._transform.translation = value
+        self._set_dirty()
 
     @property
     def rotation(self):
-        return self.transform.rotation
+        return self._transform.rotation
 
     @rotation.setter
     def rotation(self, rotation: Rotation):
-        self.transform = Transform.create(rotation, self.transform.translation)
+        self._transform.rotation = rotation
+        self._set_dirty()
 
-    def move_local(self, delta: Vec3d) -> "Frame":
+    @property
+    def parent(self):
+        return self._parent
+
+    @parent.setter
+    def parent(self, parent: "Frame | None"):
+        if self._parent is not None:
+            self._parent.remove_child(self)
+
+        self._parent = parent
+        self._set_dirty()
+
+        if parent is not None:
+            parent.set_child(self)
+
+    def set_child(self, child: "Frame"):
+        if child not in self._children:
+            self._children.append(child)
+
+    def remove_child(self, child: "Frame"):
+        self._children.remove(child)
+
+    def move(self, delta: Vec3d) -> "Frame":
         """
-        Update the frame origin by a delta.
-        :param delta: The vector to move the frame origin by.
+        Translate the frame by a delta. This moves the origin and affects all
+        children.
+        :param delta: The delta vector to move the frame by.
         """
-        self.transform = self.transform.translate(delta)
+        self._transform = self._transform.translate(delta)
+        self._set_dirty()
         return self
 
-    def rotate_local(self, delta: Rotation) -> "Frame":
+    def rotate(self, rotation: Rotation) -> "Frame":
         """
-        Update the frame origin by a delta.
+        Rotate the rame about its own origin. This affects children node's
+        positions, and origin remains the same.
         :param delta: The vector to move the frame origin by.
         """
-        self.transform = self.transform.rotate(delta)
+        self._transform = self._transform.rotate(rotation)
+        self._set_dirty()
         return self
 
-    def get_position_in_frame(self, target: "Frame | None" = None) -> Vec3d:
-        """
-        Get this frame's origin position relative to a parent target. If no
-        target is supplied, we traverse the parent tree to the top-most (usually
-        World space).
-        :param target: The target parent frame to calculate the relative position from.
-        :return: The position of this frame's origin within in the target frame.
-        """
-        relative_t = self._get_transform_to(target)
-        pos = relative_t @ self._origin.to_transform()
-        return pos.translation
+    def get_global_position(self) -> Vec3d:
+        return self._get_global_transform().translation
 
-    def to_local_position(
-        self, position: Vec3d, target: "Frame | None" = None
-    ) -> Vec3d:
-        """
-        Convert a position relative to a parent frame into local frame coordinate.
-        :param position: The position relative to a parent frame to convert to this
-                         frame's context.
-        :param target: The target parent frame to calculate the relative position from.
-        :return: The converted coordinate position
-        """
-        relative_t = self._get_transform_to(target) @ self.transform
-        pos_inv = relative_t.inverse() @ position.to_transform()
-        return pos_inv.translation
+    def get_local_position_in(self, target: "Frame | None" = None) -> Vec3d:
+        pos = self.get_global_position()
+        if target:
+            pos = target._get_global_transform().inverse() @ pos
+        return pos
 
-    def to_frame_position(self, position: Vec3d, target: "Frame|None" = None) -> Vec3d:
-        """
-        Docstring for to_frame_position
-        :param position: Description
-        :param target: Description
-        """
-        relative_t = self._get_transform_to(target)
-        pos = relative_t @ position.to_transform()
-        return pos.translation
+    def world_to_local(self, world_pos: Vec3d) -> Vec3d:
+        return self._get_global_transform().inverse() @ world_pos
+
+    def local_to_world(self, local_pos: Vec3d) -> Vec3d:
+        return self._get_global_transform() @ local_pos
 
     def copy(self):
-        return Frame(self.origin, self.rotation)
+        return Frame(self.position, self.rotation)
 
-    def _get_transform_to(self, target: "Frame | None" = None) -> Transform:
-        """
-        Get the transform from a target parent frame to the local frame.
-        :param target: The final target frame to find when traversing parents.
-        :return: The transform, not including the current frame's transform.
-        """
-        node = self.parent
-        transform = Transform.identity()
+    def _get_global_transform(self) -> Transform:
+        if self._dirty:
+            if self.parent:
+                self._global_transform = (
+                    self.parent._get_global_transform() @ self._transform
+                )
+            else:
+                self._global_transform = self._transform
+            self._dirty = False
 
-        while node is not None:
-            transform = node.transform @ transform
-            if node is target:
-                break
-            node = node.parent
+        return self._global_transform
 
-        if target and not node:
-            # we didnt' find the parent
-            raise RuntimeError("Target frame not found in parent hierarchy.")
-
-        return transform
+    def _set_dirty(self):
+        if not self._dirty:
+            self._dirty = True
+            for child in self._children:
+                child._set_dirty()

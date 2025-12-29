@@ -7,10 +7,10 @@ from enum import Enum
 class LegID(Enum):
     LF = 0
     LM = 1
-    LR = 2
+    LB = 2
     RF = 3
     RM = 4
-    RR = 5
+    RB = 5
 
 
 class Body:
@@ -38,7 +38,7 @@ class Body:
         """
         leg = self.legs[leg_id]
         # Convert body-relative position to leg-relative (coxa frame)
-        leg_local_pos = leg.frame.to_local_position(position, self.frame)
+        leg_local_pos = leg.frame.world_to_local(self.frame.local_to_world(position))
         leg.set_foot_pos(leg_local_pos)
 
     def get_foot_position(self, leg_id: LegID) -> Vec3d:
@@ -47,7 +47,7 @@ class Body:
         """
         leg = self.legs[leg_id]
         # Get foot position in world/body frame
-        return leg.foot_frame.get_position_in_frame(self.frame)
+        return leg.foot_frame.get_local_position_in(self.frame)
 
     def update_all(self):
         """Update all leg controllers."""
@@ -76,7 +76,7 @@ class Joint:
         x = frame_angle if self.joint_axis == "x" else 0.0
         y = frame_angle if self.joint_axis == "y" else 0.0
         z = frame_angle if self.joint_axis == "z" else 0.0
-        self.frame.rotate_local(Rotation.degrees(x, y, z))
+        self.frame.rotate(Rotation.degrees(x, y, z))
         self.control.set_angle(frame_angle)
 
     def get_angle(self) -> float:
@@ -166,9 +166,9 @@ class Leg:
         self.femur = femur
         self.tibia = tibia
 
-        self.femur.frame.origin = Vec3d([self.coxa.length_to_child, 0, 0])
-        self.tibia.frame.origin = Vec3d([self.femur.length_to_child, 0, 0])
-        self.foot_frame = Frame(origin=Vec3d([self.tibia.length_to_child, 0, 0]))
+        self.femur.frame.position = Vec3d(self.coxa.length_to_child, 0, 0)
+        self.tibia.frame.position = Vec3d(self.femur.length_to_child, 0, 0)
+        self.foot_frame = Frame(position=Vec3d(self.tibia.length_to_child, 0, 0))
 
         self.coxa.frame = mount_frame
         self.femur.frame.parent = self.coxa.frame
@@ -261,11 +261,9 @@ class Leg:
                 max_position_mag = cox_len + max_reach
                 scale_factor = max_position_mag / position_mag
                 position = Vec3d(
-                    [
-                        position.x * scale_factor,
-                        position.y * scale_factor,
-                        position.z * scale_factor,
-                    ]
+                    position.x * scale_factor,
+                    position.y * scale_factor,
+                    position.z * scale_factor,
                 )
                 # Recalculate after scaling
                 xyH = max(0, math.sqrt(position.y**2 + position.x**2) - cox_len)

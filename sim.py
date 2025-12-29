@@ -22,30 +22,25 @@ def create_simulation_hexapod() -> Body:
     COXA_LENGTH = 40.0
     FEMUR_LENGTH = 65.0
     TIBIA_LENGTH = 90.0
+    coxa = Joint(MockServo(), "z", COXA_LENGTH)
+    femur = Joint(MockServo(), "y", FEMUR_LENGTH)
+    tibia = Joint(MockServo(), "y", TIBIA_LENGTH)
 
-    LEG_MOUNT_ROTATION = Rotation.degrees(0, 0, 60.0)  # LM base position
-    origin = Frame()
-    mount_frame = Frame(origin=Vec3d(100.0, 0, 0))
-    mount_frame.parent = origin
-    legs = {}
-    ids = [LegID.RM, LegID.RF, LegID.LF, LegID.LM, LegID.LR, LegID.RR]
-    for id in ids:
-        legs[id] = Leg(
-            id,
-            coxa=Joint(MockServo(), "z", COXA_LENGTH),
-            femur=Joint(MockServo(), "y", FEMUR_LENGTH),
-            tibia=Joint(MockServo(), "y", TIBIA_LENGTH),
-            mount_frame=Frame(
-                mount_frame.get_position_in_frame(), mount_frame.rotation
-            ),
-        )
-        origin.rotate_local(LEG_MOUNT_ROTATION)
-        mount_frame.rotate_local(LEG_MOUNT_ROTATION)
+    joint_f = Frame(position=Vec3d(100, 0, 0))
+    rot = Rotation.degrees(0.0, 0.0, 60.0)
+
+    # the leg connection point updates the lm_frame by 60 degrees, then copies it.
+    legs = {
+        LegID.RM: Leg(LegID.RM, coxa, femur, tibia, joint_f.copy()),
+        LegID.RF: Leg(LegID.RF, coxa, femur, tibia, joint_f.rotate(rot).copy()),
+        LegID.LF: Leg(LegID.LF, coxa, femur, tibia, joint_f.rotate(rot).copy()),
+        LegID.LM: Leg(LegID.LM, coxa, femur, tibia, joint_f.rotate(rot).copy()),
+        LegID.LB: Leg(LegID.LB, coxa, femur, tibia, joint_f.rotate(rot).copy()),
+        LegID.RB: Leg(LegID.RB, coxa, femur, tibia, joint_f.rotate(rot).copy()),
+    }
 
     # Create body
-    body_frame = Frame(origin=Vec3d(0, 0, 80))
-    body = Body(body_frame, legs)
-    return body
+    return Body(Frame(position=Vec3d(0, 0, 80)), legs)
 
 
 def draw_hexapod(ax, body, clear=True):

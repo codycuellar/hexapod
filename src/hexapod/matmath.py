@@ -39,15 +39,15 @@ class Vector:
         return self._data[i]
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.as_list()})"
+        return f"{self.__class__.__name__}({self.to_list()})"
 
     def __str__(self) -> str:
-        return f"{self.as_list()}"
+        return f"{self.to_list()}"
 
     def length(self):
         return math.sqrt(sum(self[i] ** 2 for i in range(len(self))))
 
-    def as_list(self):
+    def to_list(self):
         return self._data[:]
 
     def copy(self):
@@ -101,7 +101,7 @@ class Matrix:
                 for j in range(self.N):
                     result[i, j] = sum(
                         a * b
-                        for a, b in zip(self.row(i).as_list(), other.col(j).as_list())
+                        for a, b in zip(self.row(i).to_list(), other.col(j).to_list())
                     )
             return result
         else:
@@ -117,10 +117,10 @@ class Matrix:
             )
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.as_list()})"
+        return f"{self.__class__.__name__}({self.to_list()})"
 
     def __str__(self) -> str:
-        return f"{self.as_list()}"
+        return f"{self.to_list()}"
 
     @property
     def T(self) -> "Matrix":
@@ -162,8 +162,8 @@ class Matrix:
                     return False
         return True
 
-    def as_list(self):
+    def to_list(self):
         return [row[:] for row in self._data]
 
     def copy(self) -> "Matrix":
-        return Matrix(self.as_list())
+        return Matrix(self.to_list())

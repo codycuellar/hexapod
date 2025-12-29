@@ -96,8 +96,8 @@ class HexapodController:
         # Phase 0.0-0.5: Group 1 swings, Group 2 supports
         # Phase 0.5-1.0: Group 2 swings, Group 1 supports
 
-        swing_group_1 = [LegID.LF, LegID.RM, LegID.RR]
-        swing_group_2 = [LegID.RF, LegID.LM, LegID.LR]
+        swing_group_1 = [LegID.LF, LegID.RM, LegID.RB]
+        swing_group_2 = [LegID.RF, LegID.LM, LegID.LB]
 
         if self.gait_phase < 0.5:
             swing_legs = swing_group_1
