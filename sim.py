@@ -4,13 +4,17 @@ Real-time 3D visualization of hexapod walking simulation.
 Hardcoded hexapod creation for simulation - no config needed.
 """
 
+import time
+from typing import cast
+
 import numpy as np
+from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
 
-from hexapod.hexpod import Body, Leg, LegID, Joint
+from hexapod.hexpod import Body, Leg, LegID
 from hexapod.engine import Frame, Vec3d, Rotation
 from hexapod.servos import MockServo
-from hexapod.controller import HexapodController
+from hexapod.motion_planner import MotionPlanner
 
 
 def create_simulation_hexapod() -> Body:
@@ -19,200 +23,96 @@ def create_simulation_hexapod() -> Body:
     No config needed - just builds the frame hierarchy directly.
     """
     # Joint lengths (mm)
-    COXA_LENGTH = 40.0
-    FEMUR_LENGTH = 65.0
-    TIBIA_LENGTH = 90.0
-    coxa = Joint(MockServo(), "z", COXA_LENGTH)
-    femur = Joint(MockServo(), "y", FEMUR_LENGTH)
-    tibia = Joint(MockServo(), "y", TIBIA_LENGTH)
+    COXA_LEN = 40.0
+    FEMUR_LEN = 65.0
+    TIBIA_LEN = 90.0
 
-    joint_f = Frame(position=Vec3d(100, 0, 0))
-    rot = Rotation.degrees(0.0, 0.0, 60.0)
+    origin_frame = Frame()
+    distance = Vec3d(100, 0, 0)
 
-    # the leg connection point updates the lm_frame by 60 degrees, then copies it.
-    legs = {
-        LegID.RM: Leg(LegID.RM, coxa, femur, tibia, joint_f.copy()),
-        LegID.RF: Leg(LegID.RF, coxa, femur, tibia, joint_f.rotate(rot).copy()),
-        LegID.LF: Leg(LegID.LF, coxa, femur, tibia, joint_f.rotate(rot).copy()),
-        LegID.LM: Leg(LegID.LM, coxa, femur, tibia, joint_f.rotate(rot).copy()),
-        LegID.LB: Leg(LegID.LB, coxa, femur, tibia, joint_f.rotate(rot).copy()),
-        LegID.RB: Leg(LegID.RB, coxa, femur, tibia, joint_f.rotate(rot).copy()),
-    }
+    # get the position in the frame's local coordinates to the global coordinates,
+    # and rotate the frame 60 degrees for each leg
+    ids = [LegID.RM, LegID.RF, LegID.LF, LegID.LM, LegID.LB, LegID.RB]
+    leg_setup = [COXA_LEN, FEMUR_LEN, TIBIA_LEN, MockServo(), MockServo(), MockServo()]
 
-    # Create body
-    return Body(Frame(position=Vec3d(0, 0, 80)), legs)
+    legs = {}
+
+    for id in ids:
+        mount_pos = origin_frame.local_to_world(distance)
+        frame = Frame(position=mount_pos, rotation=origin_frame.rotation)
+        legs[id] = Leg(id, frame, *leg_setup)
+        origin_frame.rotate(Rotation.degrees(0.0, 0.0, 60.0))
+
+    return Body(Frame(), legs)
 
 
-def draw_hexapod(ax, body, clear=True):
-    """Draw the hexapod in 3D space - static visualization."""
-    if clear:
-        ax.clear()
+def draw_hexapod(ax, body: Body, leg_lines):
+    for leg_id, leg in body.legs.items():
+        p0 = leg.coxa_frame.get_global_position()
+        p1 = leg.femur_frame.get_global_position()
+        p2 = leg.tibia_frame.get_global_position()
+        p3 = leg.foot_frame.get_global_position()
 
-    body_pos = body.frame.origin
+        xs = [p0.x, p1.x, p2.x, p3.x]
+        ys = [p0.y, p1.y, p2.y, p3.y]
+        zs = [p0.z, p1.z, p2.z, p3.z]
 
-    # Draw body center as a dot
-    ax.scatter(
-        [body_pos.x],
-        [body_pos.y],
-        [body_pos.z],
-        color="black",
-        s=200,
-        marker="o",
-        label="Body",
-    )
-
-    circle_radius = 80.0
-
-    # Draw XY plane circle around body
-    theta = np.linspace(0, 2 * np.pi, 100)
-    circle_x = body_pos.x + circle_radius * np.cos(theta)
-    circle_y = body_pos.y + circle_radius * np.sin(theta)
-    circle_z = np.full(100, body_pos.z)
-    ax.plot(circle_x, circle_y, circle_z, "b-", alpha=0.3, linewidth=1)
-
-    # Color mapping: each leg gets a unique color
-    leg_colors = {
-        "LF": "red",
-        "RF": "orange",
-        "LM": "blue",
-        "RM": "cyan",
-        "LR": "green",
-        "RR": "purple",
-    }
-
-    # Draw leg segments with color coding
-    for leg_id in LegID:
-        if leg_id not in body.legs:
-            continue
-
-        leg = body.legs[leg_id]
-        leg_name = leg_id.name
-        leg_color = leg_colors.get(leg_name, "gray")
-
-        # Get positions in body frame (world coordinates)
-        coxa_pos = leg.coxa.frame.get_position_in_frame(body.frame)
-        femur_pos = leg.femur.frame.get_position_in_frame(body.frame)
-        tibia_pos = leg.tibia.frame.get_position_in_frame(body.frame)
-        foot_pos = leg.foot_frame.get_position_in_frame(body.frame)
-
-        # Draw connecting lines
-        ax.plot(
-            [body_pos.x, coxa_pos.x],
-            [body_pos.y, coxa_pos.y],
-            [body_pos.z, coxa_pos.z],
-            color=leg_color,
-            linewidth=1,
-            alpha=0.5,
-            linestyle="--",
-        )
-        ax.plot(
-            [coxa_pos.x, femur_pos.x],
-            [coxa_pos.y, femur_pos.y],
-            [coxa_pos.z, femur_pos.z],
-            color=leg_color,
-            linewidth=2,
-            alpha=0.8,
-        )
-        ax.plot(
-            [femur_pos.x, tibia_pos.x],
-            [femur_pos.y, tibia_pos.y],
-            [femur_pos.z, tibia_pos.z],
-            color=leg_color,
-            linewidth=2,
-            alpha=0.8,
-        )
-        ax.plot(
-            [tibia_pos.x, foot_pos.x],
-            [tibia_pos.y, foot_pos.y],
-            [tibia_pos.z, foot_pos.z],
-            color=leg_color,
-            linewidth=2,
-            alpha=0.8,
-        )
-
-        # Draw all joints as dots (label once per leg for legend)
-        ax.scatter(
-            [coxa_pos.x],
-            [coxa_pos.y],
-            [coxa_pos.z],
-            color=leg_color,
-            s=100,
-            marker="o",
-            label=leg_name,
-        )
-        ax.scatter(
-            [femur_pos.x],
-            [femur_pos.y],
-            [femur_pos.z],
-            color=leg_color,
-            s=80,
-            marker="s",
-        )
-        ax.scatter(
-            [tibia_pos.x],
-            [tibia_pos.y],
-            [tibia_pos.z],
-            color=leg_color,
-            s=80,
-            marker="^",
-        )
-        ax.scatter(
-            [foot_pos.x], [foot_pos.y], [foot_pos.z], color=leg_color, s=150, marker="*"
-        )
-
-    # Set labels and limits
-    ax.set_xlabel("X (mm)")
-    ax.set_ylabel("Y (mm)")
-    ax.set_zlabel("Z (mm)")
-    ax.set_title("Hexapod Frame Visualization")
-
-    # Set limits first
-    xlim = [-350, 350]
-    ylim = [-350, 350]
-    zlim = [0, 200]
-    ax.set_xlim(xlim)
-    ax.set_ylim(ylim)
-    ax.set_zlim(zlim)
-
-    # Calculate aspect ratio based on limits to ensure equal scaling
-    # This ensures 1 unit on each axis appears the same length
-    x_range = xlim[1] - xlim[0]
-    y_range = ylim[1] - ylim[0]
-    z_range = zlim[1] - zlim[0]
-    max_range = max(x_range, y_range, z_range)
-
-    # Normalize to make all ranges appear equal
-    ax.set_box_aspect([x_range / max_range, y_range / max_range, z_range / max_range])
-
-    # Add legend
-    ax.legend(loc="upper left", bbox_to_anchor=(1.05, 1))
+        line = leg_lines[leg_id]
+        line.set_data(xs, ys)
+        line.set_3d_properties(zs)
 
 
 def main():
-    # Create hexapod directly (hardcoded for simulation)
-    print("Creating hexapod for simulation...")
+    print("Creating hexapod...")
     hexapod = create_simulation_hexapod()
 
-    # Create controller and snap to walking gait
-    print("Creating controller...")
-    controller = HexapodController(hexapod)
+    print("Creating path planner...")
+    controller = MotionPlanner(hexapod, Vec3d(140, 0, -80))
     controller.initialize()
 
-    # # Set to tripod gait and snap to a walking position
-    # print("Snapping to tripod gait position...")
-    # controller.set_gait("tripod")
-    # controller.gait_phase = 0.25  # Set to a specific phase (0.25 = mid-swing for group 1)
-    # controller.update(0.0)  # Update with dt=0 to snap to position (no animation)
-
-    # Set up matplotlib for static plotting
+    plt.ion()
     fig = plt.figure(figsize=(14, 10))
-    ax = fig.add_subplot(111, projection="3d")
+    ax: Axes3D = cast(Axes3D, fig.add_subplot(111, projection="3d"))
 
-    # Draw hexapod (static)
-    draw_hexapod(ax, hexapod, clear=False)
+    ax.set_xlim(-200, 200)
+    ax.set_ylim(-200, 200)
+    ax.set_zlim(0, 200)
 
-    # Show the plot (blocks until window is closed)
-    plt.show()
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_zlabel("Z")
+
+    plt.show(block=False)
+
+    leg_lines = {}
+    for leg_id in hexapod.legs:
+        (line,) = ax.plot([], [], [], "o-", lw=2)
+        leg_lines[leg_id] = line
+
+    DT = 0.1  # simulating can't go much faster
+    next_time = time.perf_counter()
+    prev_time = time.perf_counter()
+
+    running = True
+    while running:
+        now = time.perf_counter()
+        actual_dt = now - prev_time
+        prev_time = now
+        if actual_dt > DT * 1.1:
+            print(f"OVERRUN: {actual_dt*1000:.2f} ms")
+
+        controller.step(DT)
+
+        draw_hexapod(ax, hexapod, leg_lines)
+        fig.canvas.draw_idle()
+        fig.canvas.flush_events()
+        plt.pause(0.001)  # <-- GUI event pump only
+
+        next_time += DT
+        sleep_time = next_time - time.perf_counter()
+
+        if sleep_time > 0:
+            time.sleep(sleep_time)
 
 
 if __name__ == "__main__":

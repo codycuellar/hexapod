@@ -69,17 +69,15 @@ class Rotation(Matrix):
         return Rotation([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
 
     @staticmethod
-    def degrees(x_deg: float, y_deg: float, z_deg: float) -> "Rotation":
+    def degrees(x: float = 0.0, y: float = 0.0, z: float = 0.0) -> "Rotation":
         """
         Create a Rotation instance from Euler angles in degrees.
-        :param x_deg: Rotation about the x axis in degrees.
-        :param y_deg: Rotation about the y axis in degrees.
-        :param z_deg: Rotation about the z axis in degrees.
+        :param x: Rotation about the x axis in degrees.
+        :param y: Rotation about the y axis in degrees.
+        :param z: Rotation about the z axis in degrees.
         :return: The Rotation instance.
         """
-        return Rotation.radians(
-            math.radians(x_deg), math.radians(y_deg), math.radians(z_deg)
-        )
+        return Rotation.radians(math.radians(x), math.radians(y), math.radians(z))
 
     @staticmethod
     def radians(x_rad: float, y_rad: float, z_rad: float) -> "Rotation":
@@ -124,10 +122,10 @@ class Rotation(Matrix):
     @overload
     def __matmul__(self, other: Vec3d) -> Vec3d: ...
     def __matmul__(self, other):
-        if isinstance(other, "Rotation"):
+        if isinstance(other, Rotation):
             return Rotation(super().__matmul__(other).to_list())
         else:
-            return Vec3d(*super().__matmul__(other).as_list())
+            return Vec3d(*super().__matmul__(other).to_list())
 
     @property
     def T(self) -> "Rotation":
@@ -193,7 +191,7 @@ class Transform(Matrix):
 
     @property
     def rotation(self) -> Rotation:
-        return Rotation([self.row(i).to_list() for i in range(3)])
+        return Rotation([self.row(i).to_list()[:3] for i in range(3)])
 
     @rotation.setter
     def rotation(self, rotation: Rotation):
@@ -203,7 +201,7 @@ class Transform(Matrix):
 
     @property
     def translation(self) -> Vec3d:
-        return Vec3d(*self.col(3).to_list())
+        return Vec3d(*self.col(3).to_list()[:3])
 
     @translation.setter
     def translation(self, translation: Vec3d):
@@ -246,12 +244,11 @@ class Frame:
             should be the world frame.
         """
         self._transform = Transform.create(rotation, position)
-        self._dirty = False  # if this frame or a parent has changed
         self._parent: "Frame | None" = None
         self._children: list[Frame] = []
+        self._global_transform: Transform | None = None
         if parent:
             self.parent = parent
-        self._global_transform = self._get_global_transform()
 
     def __repr__(self):
         return f"<Frame origin={self.position} rotation={self.rotation} parent={self.parent is not None}>"
@@ -319,11 +316,9 @@ class Frame:
     def get_global_position(self) -> Vec3d:
         return self._get_global_transform().translation
 
-    def get_local_position_in(self, target: "Frame | None" = None) -> Vec3d:
+    def get_position_in(self, target: "Frame") -> Vec3d:
         pos = self.get_global_position()
-        if target:
-            pos = target._get_global_transform().inverse() @ pos
-        return pos
+        return target._get_global_transform().inverse() @ pos
 
     def world_to_local(self, world_pos: Vec3d) -> Vec3d:
         return self._get_global_transform().inverse() @ world_pos
@@ -331,23 +326,26 @@ class Frame:
     def local_to_world(self, local_pos: Vec3d) -> Vec3d:
         return self._get_global_transform() @ local_pos
 
+    def local_to_frame(self, target: "Frame", local_pos: Vec3d):
+        pos = self.local_to_world(local_pos)
+        return target._get_global_transform().inverse() @ pos
+
     def copy(self):
         return Frame(self.position, self.rotation)
 
     def _get_global_transform(self) -> Transform:
-        if self._dirty:
+        transform: Transform
+        if not self._global_transform:
             if self.parent:
-                self._global_transform = (
-                    self.parent._get_global_transform() @ self._transform
-                )
+                transform = self.parent._get_global_transform() @ self._transform
             else:
-                self._global_transform = self._transform
-            self._dirty = False
-
-        return self._global_transform
+                transform = self._transform
+            return transform
+        else:
+            return self._global_transform
 
     def _set_dirty(self):
-        if not self._dirty:
-            self._dirty = True
+        if self._global_transform:
+            self._global_transform = None
             for child in self._children:
                 child._set_dirty()

@@ -47,6 +47,9 @@ class Vector:
     def length(self):
         return math.sqrt(sum(self[i] ** 2 for i in range(len(self))))
 
+    def distance_to(self, other: "Vector") -> float:
+        return abs((self - other).length())
+
     def to_list(self):
         return self._data[:]
 
