@@ -10,6 +10,7 @@ from typing import cast
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
 
+from controller.gamepad import GamePad
 from hexapod.hexpod import Body, Leg, LegID
 from hexapod.engine import Frame, Vec2d, Vec3d, Rotation
 from hexapod.servos import MockServo
@@ -45,7 +46,7 @@ def create_simulation_hexapod() -> Body:
     return Body(Frame(), legs)
 
 
-def draw_hexapod(ax, body: Body, leg_lines):
+def draw_hexapod(ax, body: Body, leg_lines, body_line):
     for leg_id, leg in body.legs.items():
         p0 = leg.coxa_frame.get_origin_in_world()
         p1 = leg.femur_frame.get_origin_in_world()
@@ -60,14 +61,29 @@ def draw_hexapod(ax, body: Body, leg_lines):
         line.set_data(xs, ys)
         line.set_3d_properties(zs)
 
+    # order of legs: make sure consistent
+    coxa_points = [leg.coxa_frame.get_origin_in_world() for leg in body.legs.values()]
+    # repeat first point at end if you want a loop
+    coxa_points.append(coxa_points[0])
+
+    xs = [p.x for p in coxa_points]
+    ys = [p.y for p in coxa_points]
+    zs = [p.z for p in coxa_points]
+
+    body_line.set_data(xs, ys)
+    body_line.set_3d_properties(zs)
+
 
 def main():
     print("Creating hexapod...")
     hexapod = create_simulation_hexapod()
 
+    gamepad = GamePad()
+    gamepad.start_reading()
+
     print("Creating path planner...")
-    controller = MotionPlanner(hexapod, Vec3d(140, 0, -80))
-    controller.initialize()
+    motion_planner = MotionPlanner(hexapod, Vec3d(140, 0, -80))
+    motion_planner.initialize()
 
     plt.ion()
     fig = plt.figure(figsize=(14, 10))
@@ -87,36 +103,18 @@ def main():
     for leg_id in hexapod.legs:
         (line,) = ax.plot([], [], [], "o-", lw=2)
         leg_lines[leg_id] = line
-
-    DT = 0.1  # simulating can't go much faster
-    total_time = 0.0
+    (body_line,) = ax.plot([], [], [], "k-", lw=2)  # black line
+    DT = 1 / 20  # simulating can't go much faster
 
     next_time = time.perf_counter()
-    prev_time = time.perf_counter()
 
-    gait_vector = Vec2d(0, 0.1)
     running = True
 
     while running:
-        now = time.perf_counter()
+        motion_planner.update_gait(gamepad.joy_l, gamepad.trigger_r - gamepad.trigger_l)
+        motion_planner.step(DT)
 
-        actual_dt = now - prev_time
-        prev_time = now
-
-        total_time += actual_dt
-
-        if actual_dt > DT * 1.1:
-            print(f"OVERRUN: {actual_dt*1000:.2f} ms")
-
-        controller.step(DT)
-
-        if total_time > 10:
-            gait_vector = Vec2d(0.2, -0.2)
-
-        controller.update_gait(gait_vector)
-        controller.step(DT)
-
-        draw_hexapod(ax, hexapod, leg_lines)
+        draw_hexapod(ax, hexapod, leg_lines, body_line)
         fig.canvas.draw_idle()
         fig.canvas.flush_events()
         plt.pause(0.001)  # <-- GUI event pump only

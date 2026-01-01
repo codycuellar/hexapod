@@ -25,17 +25,23 @@ class GaitState(Enum):
 
 class TripodGait:
     leg_relative_position = Vec3d(150, 0, -60)
-    max_velocity = 120
-    gait_radius = 25
-    step_height = 25
+    max_velocity = 120  # mm/s
+    gait_radius = 25  # mm
+    step_height = 25  # mm
+
+    # max_rotation_angle = 20  # +/- degrees
+    # max_rotation_speed = 45  # deg/s
+
+    stride_control_start = Vec3d(z=leg_relative_position.z)
+    swing_control_start = Vec3d(z=leg_relative_position.z + step_height)
 
     def __init__(self):
-        self.stride_control = Frame(origin=Vec3d(z=self.leg_relative_position.z))
-        self.swing_control = Frame(
-            origin=Vec3d(z=self.leg_relative_position.z + self.step_height)
-        )
+        self.stride_control = Frame(origin=self.stride_control_start)
+        self.swing_control = Frame(origin=-self.stride_control_start)
 
         self.gait_vector = Vec2d()
+        self.last_nonzero_vector = Vec2d()
+        self.rotation_velocity = 0.0
 
         offset = Vec3d(220, 0, 0)
         rm_direction_frame = Frame(offset, parent=self.stride_control)
@@ -65,32 +71,40 @@ class TripodGait:
             LegID.LM: Frame(parent=lm_direction_frame),
             LegID.RB: Frame(parent=rb_direction_frame),
         }
-        pass
 
     def get_foot_global_positions(self):
         legs = list(self.stride_group.items()) + list(self.swing_group.items())
         return {leg_id: frame.get_origin_in_world() for leg_id, frame in legs}
 
-    def update(self, gait_vector: Vec2d):
-        # TODO: Handle rotations
+    def update(self, gait_vector: Vec2d, rotation_velocity: float):
+        l = gait_vector.length()
+        if l > 1.0:
+            gait_vector /= l
         self.gait_vector = gait_vector
+
+        if l > 0.0:
+            self.last_nonzero_vector = gait_vector
+
+        self.rotation_velocity = min(1.0, max(-1.0, rotation_velocity))
 
     def step(self, dt: float):
         velocity = self.gait_vector.length() * self.max_velocity
         distance_to_move = velocity * dt
 
         foot_pos: Vec3d
+        foot_angle = self.last_nonzero_vector.degree_y()
+
         for frame in self.stride_group.values():
             if not frame.parent:
                 raise ValueError("Incorrect gait setup, no parent for foot frame.")
-            frame.parent.rotation = Rotation.degrees(z=self.gait_vector.degree_y())
+            frame.parent.rotation = Rotation.degrees(z=foot_angle)
             frame.origin -= Vec3d(y=distance_to_move)
             foot_pos = frame.origin
 
         for frame in self.swing_group.values():
             if not frame.parent:
                 raise ValueError("Incorrect gait setup, no parent for foot frame.")
-            frame.parent.rotation = Rotation.degrees(z=self.gait_vector.degree_y())
+            frame.parent.rotation = Rotation.degrees(z=foot_angle)
             frame.origin += Vec3d(y=distance_to_move)
 
         phase = abs(self.gait_radius - foot_pos.y) / (self.gait_radius * 2)
@@ -99,7 +113,7 @@ class TripodGait:
 
         # ease on start, top, and back down to bottom.
         z = self.step_height * 0.5 * (1 - math.cos(2 * math.pi * phase))
-        self.swing_control.origin = Vec3d(z=z)
+        self.swing_control.origin = Vec3d(z=self.leg_relative_position.z + z)
 
     def _flip_groups(self):
         swing_c = self.swing_control
@@ -109,9 +123,8 @@ class TripodGait:
         self.stride_control = swing_c
         self.stride_group = swing_g
 
-        self.stride_control.origin = Vec3d()
-        self.swing_control.origin = Vec3d()
-        # TODO: handle rotation
+        self.stride_control.origin = self.stride_control_start
+        self.swing_control.origin = -self.stride_control_start
 
         for frame in self.stride_group.values():
             frame.origin = Vec3d(y=self.gait_radius)
@@ -129,7 +142,6 @@ class MotionPlanner:
     def __init__(self, body: Body, leg_relative_stand_position: Vec3d):
         self.body = body
 
-        self.gait_vector = Vec2d()  # Body-relative velocity (x, y, z)
         self.rotation = Vec3d()  # Body rotation rates (roll, pitch, yaw)
 
         self.gait = TripodGait()
@@ -166,53 +178,59 @@ class MotionPlanner:
 
         self._start_transition(GaitState.STANDING)
 
-    def update_gait(self, gait_vector: Vec2d):
+    def update_gait(self, gait_vector: Vec2d, rotation_velocity):
         """Set desired body-relative normalized velocity vector."""
-        self.gait_vector = gait_vector
+        self.gait.update(gait_vector, rotation_velocity)
 
     def update_body_position(self, rotation: Vec3d):
         """Set desired body rotation rates (roll, pitch, yaw in deg/s)."""
         self.rotation = rotation
 
     def step(self, dt: float):
-        if self.transitioning:
-            self._do_transition(dt)
-        else:
-            velocity = self.gait_vector.length()
-            if self.state != GaitState.WALKING and velocity > 0:
-                self._start_transition(GaitState.WALKING)
-            elif self.state != GaitState.STANDING and velocity == 0:
-                self._start_transition(GaitState.STANDING)
-            else:
-                self.gait.update(self.gait_vector)
-                self.gait.step(dt)
-                positions = self.gait.get_foot_global_positions()
-                for id, pos in positions.items():
-                    self.body.set_foot_position(
-                        id, self.body.frame.world_pos_to_local(pos)
-                    )
+        # TODO: Accumulate inactive motion time.
 
-    def _get_next_initial_pos(self, leg_id: LegID, state: GaitState):
-        return self.standing_foot_positions[leg_id]
+        # if self.transitioning:
+        #     self._do_transition(dt)
+        # else:
+        # velocity = self.gait_vector.length()
+        # if self.state != GaitState.WALKING and velocity > 0:
+        #     print("going to walking")
+        #     self._start_transition(GaitState.WALKING)
+        # elif self.state != GaitState.STANDING and velocity == 0:
+        #     self._start_transition(GaitState.STANDING)
+        # else:
+        self.gait.step(dt)
+        positions = self.gait.get_foot_global_positions()
+        for id, pos in positions.items():
+            self.body.set_foot_position(id, self.body.frame.world_pos_to_local(pos))
+
+    def _get_next_initial_pos(self, state: GaitState):
+        if state == GaitState.STANDING:
+            return self.standing_foot_positions
+        else:
+            positions = self.gait.get_foot_global_positions()
+            return {
+                id: self.body.frame.world_pos_to_local(val)
+                for id, val in positions.items()
+            }
 
     def _start_transition(self, state: GaitState):
         self.state = state
         self.transitioning = True
         self.time_in_transition = 0.0
 
+        targets = self._get_next_initial_pos(state)
         max_distance = 0.0
         for id in self.body.legs.keys():
             start = self.body.get_foot_position(id)
-            target = self._get_next_initial_pos(id, state)
             self.transition_start_position[id] = start
-            self.target_foot_positions[id] = target
-            max_distance = max(max_distance, start.distance_to(target))
+            self.target_foot_positions[id] = targets[id]
+            max_distance = max(max_distance, start.distance_to(targets[id]))
 
         self.transition_target_time = max_distance / self.min_transition_velocity[state]
 
     def _do_transition(self, dt: float):
         self.time_in_transition += dt
-        # print(dt)
         t = self.time_in_transition / self.transition_target_time
         if t <= 1.0:
             for id in self.body.leg_ids:

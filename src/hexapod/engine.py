@@ -26,11 +26,11 @@ class Vec2d(Vector):
 
     @property
     def x(self):
-        return self[0]
+        return self._data[0]
 
     @property
     def y(self):
-        return self[1]
+        return self._data[1]
 
     def normalize(self) -> "Vec2d":
         l = self.length()
@@ -45,12 +45,13 @@ class Vec2d(Vector):
         return math.degrees(self.angle_x())
 
     def angle_y(self) -> float:
+        if all([i == 0.0 for i in self._data]):
+            return 0.0
         offset = math.pi / 2
         return (self.angle_x() - offset + math.pi) % (2 * math.pi) - math.pi
 
     def degree_y(self) -> float:
-        offset = 90
-        return (self.degree_x() - offset + 180) % 360 - 180
+        return math.degrees(self.angle_y())
 
 
 class Vec3d(Vector):
