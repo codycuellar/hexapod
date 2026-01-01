@@ -1,15 +1,15 @@
 import math
 
 from hexapod.matmath import Vector
-from hexapod.engine import Vec3d
+from hexapod.engine import Vec2d, Vec3d
 
 
 def lerp(v1: float, v2: float, t: float):
     return v1 + (v2 - v1) * t
 
 
-def lerp_2d(p1: Vector, p2: Vector, t: float):
-    return Vector([lerp(p1[0], p2[0], t), lerp(p1[1], p2[1], t)])
+def lerp_2d(p1: Vec2d, p2: Vec2d, t: float):
+    return Vec2d(lerp(p1.x, p2.x, t), lerp(p1.y, p2.y, t))
 
 
 def lerp_3d(p1: Vec3d, p2: Vec3d, t: float):
@@ -20,9 +20,9 @@ def quad_bez(v1: float, v2: float, v3: float, t: float):
     return lerp(lerp(v1, v2, t), lerp(v2, v3, t), t)
 
 
-def quad_bez_2d(p1: Vector, p2: Vector, p3: Vector, t: float):
+def quad_bez_2d(p1: Vec2d, p2: Vec2d, p3: Vec2d, t: float):
 
-    return Vector([quad_bez(p1[0], p2[0], p3[0], t), quad_bez(p1[1], p2[1], p3[1], t)])
+    return Vector([quad_bez(p1.x, p2.x, p3.x, t), quad_bez(p1.y, p2.y, p3.y, t)])
 
 
 def quad_bez_3d(p1: Vec3d, p2: Vec3d, p3: Vec3d, t: float):

@@ -4,12 +4,57 @@ from typing import overload
 from hexapod.matmath import Vector, Matrix
 
 
-class Vec3d(Vector):
-    @staticmethod
-    def zero():
-        return Vec3d(0, 0, 0)
+class Vec2d(Vector):
+    def __init__(self, x: float = 0.0, y: float = 0.0):
+        return super().__init__([x, y])
 
-    def __init__(self, x: float, y: float, z: float):
+    def __add__(self, other: "Vec2d") -> "Vec2d":
+        return Vec2d(*super().__add__(other)._data)
+
+    def __sub__(self, other: "Vec2d") -> "Vec2d":
+        self._ensure_len_eq(other)
+        return Vec2d(*super().__sub__(other)._data)
+
+    def __mul__(self, scalar: float) -> "Vec2d":
+        return Vec2d(*super().__mul__(scalar)._data)
+
+    def __truediv__(self, scalar: float) -> "Vec2d":
+        return Vec2d(*super().__truediv__(scalar)._data)
+
+    def __neg__(self):
+        return Vec2d(*super().__neg__()._data)
+
+    @property
+    def x(self):
+        return self[0]
+
+    @property
+    def y(self):
+        return self[1]
+
+    def normalize(self) -> "Vec2d":
+        l = self.length()
+        if l == 0:
+            return Vec2d(0, 0)
+        return Vec2d(*(self * (1 / l)))
+
+    def angle_x(self) -> float:
+        return math.atan2(self.y, self.x)
+
+    def degree_x(self) -> float:
+        return math.degrees(self.angle_x())
+
+    def angle_y(self) -> float:
+        offset = math.pi / 2
+        return (self.angle_x() - offset + math.pi) % (2 * math.pi) - math.pi
+
+    def degree_y(self) -> float:
+        offset = 90
+        return (self.degree_x() - offset + 180) % 360 - 180
+
+
+class Vec3d(Vector):
+    def __init__(self, x: float = 0.0, y: float = 0.0, z: float = 0.0):
         return super().__init__([x, y, z])
 
     def __add__(self, other: "Vec3d") -> "Vec3d":
@@ -80,7 +125,7 @@ class Rotation(Matrix):
         return Rotation.radians(math.radians(x), math.radians(y), math.radians(z))
 
     @staticmethod
-    def radians(x_rad: float, y_rad: float, z_rad: float) -> "Rotation":
+    def radians(x: float = 0.0, y: float = 0.0, z: float = 0.0) -> "Rotation":
         """
         Create a Rotation instance from Euler angles in radians.
         :param x_rad: Rotation about the x axis in radians.
@@ -88,9 +133,9 @@ class Rotation(Matrix):
         :param z_rad: Rotation about the z axis in radians.
         :return: The Rotation instance.
         """
-        cos_x, sin_x = math.cos(x_rad), math.sin(x_rad)
-        cos_y, sin_y = math.cos(y_rad), math.sin(y_rad)
-        cos_z, sin_z = math.cos(z_rad), math.sin(z_rad)
+        cos_x, sin_x = math.cos(x), math.sin(x)
+        cos_y, sin_y = math.cos(y), math.sin(y)
+        cos_z, sin_z = math.cos(z), math.sin(z)
         return Rotation(
             [
                 [
@@ -159,7 +204,7 @@ class Transform(Matrix):
         if not isinstance(rotation, Rotation):
             rotation = Rotation.identity()
         if not isinstance(translation, Vec3d):
-            translation = Vec3d.zero()
+            translation = Vec3d()
 
         return Transform(Transform._combine_transforms(rotation, translation))
 
@@ -229,7 +274,7 @@ class Frame:
 
     def __init__(
         self,
-        position: Vec3d | None = None,
+        origin: Vec3d | None = None,
         rotation: Rotation | None = None,
         parent: "Frame | None" = None,
     ):
@@ -243,7 +288,7 @@ class Frame:
             The parent frame of this frame. The only frame without a parennt
             should be the world frame.
         """
-        self._transform = Transform.create(rotation, position)
+        self._transform = Transform.create(rotation, origin)
         self._parent: "Frame | None" = None
         self._children: list[Frame] = []
         self._global_transform: Transform | None = None
@@ -251,14 +296,14 @@ class Frame:
             self.parent = parent
 
     def __repr__(self):
-        return f"<Frame origin={self.position} rotation={self.rotation} parent={self.parent is not None}>"
+        return f"<Frame origin={self.origin} rotation={self.rotation} parent={self.parent is not None}>"
 
     @property
-    def position(self):
+    def origin(self):
         return self._transform.translation
 
-    @position.setter
-    def position(self, value: Vec3d):
+    @origin.setter
+    def origin(self, value: Vec3d):
         self._transform.translation = value
         self._set_dirty()
 
@@ -313,31 +358,31 @@ class Frame:
         self._set_dirty()
         return self
 
-    def get_global_position(self) -> Vec3d:
-        return self._get_global_transform().translation
+    def get_origin_in_world(self) -> Vec3d:
+        return self._get_transform_from_world().translation
 
-    def get_position_in(self, target: "Frame") -> Vec3d:
-        pos = self.get_global_position()
-        return target._get_global_transform().inverse() @ pos
+    def get_origin_in_frame(self, target: "Frame") -> Vec3d:
+        pos = self.get_origin_in_world()
+        return target._get_transform_from_world().inverse() @ pos
 
-    def world_to_local(self, world_pos: Vec3d) -> Vec3d:
-        return self._get_global_transform().inverse() @ world_pos
+    def world_pos_to_local(self, world_pos: Vec3d) -> Vec3d:
+        return self._get_transform_from_world().inverse() @ world_pos
 
-    def local_to_world(self, local_pos: Vec3d) -> Vec3d:
-        return self._get_global_transform() @ local_pos
+    def local_pos_to_world(self, local_pos: Vec3d) -> Vec3d:
+        return self._get_transform_from_world() @ local_pos
 
-    def local_to_frame(self, target: "Frame", local_pos: Vec3d):
-        pos = self.local_to_world(local_pos)
-        return target._get_global_transform().inverse() @ pos
+    def local_pos_to_frame(self, target: "Frame", local_pos: Vec3d):
+        pos = self.local_pos_to_world(local_pos)
+        return target._get_transform_from_world().inverse() @ pos
 
     def copy(self):
-        return Frame(self.position, self.rotation)
+        return Frame(self.origin, self.rotation)
 
-    def _get_global_transform(self) -> Transform:
+    def _get_transform_from_world(self) -> Transform:
         transform: Transform
         if not self._global_transform:
             if self.parent:
-                transform = self.parent._get_global_transform() @ self._transform
+                transform = self.parent._get_transform_from_world() @ self._transform
             else:
                 transform = self._transform
             return transform

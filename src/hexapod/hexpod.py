@@ -1,7 +1,7 @@
 import math
 
 from hexapod.servos import JointControl
-from hexapod.engine import Frame, Transform, Vec3d, Rotation
+from hexapod.engine import Frame, Vec3d, Vec2d, Rotation
 from enum import Enum
 
 
@@ -34,7 +34,9 @@ class Body:
         Set foot position for a specific leg in body-relative coordinates.
         """
         leg = self.legs[leg_id]
-        leg_local_pos = leg.frame.world_to_local(self.frame.local_to_world(position))
+        leg_local_pos = leg.frame.world_pos_to_local(
+            self.frame.local_pos_to_world(position)
+        )
         leg.set_foot_pos(leg_local_pos)
 
     def get_foot_position(self, leg_id: LegID) -> Vec3d:
@@ -42,7 +44,7 @@ class Body:
         Get current foot position in body-relative coordinates.
         """
         leg = self.legs[leg_id]
-        return leg.foot_frame.get_position_in(self.frame)
+        return leg.foot_frame.get_origin_in_frame(self.frame)
 
     def update(self):
         """Update all leg controllers."""
@@ -90,13 +92,13 @@ class Leg:
 
         self.coxa_frame = Frame(parent=self.frame)
         self.femur_frame = Frame(
-            position=Vec3d(coxa_length, 0, 0), parent=self.coxa_frame
+            origin=Vec3d(coxa_length, 0, 0), parent=self.coxa_frame
         )
         self.tibia_frame = Frame(
-            position=Vec3d(femur_length, 0, 0), parent=self.femur_frame
+            origin=Vec3d(femur_length, 0, 0), parent=self.femur_frame
         )
         self.foot_frame = Frame(
-            position=Vec3d(tibia_length, 0, 0), parent=self.tibia_frame
+            origin=Vec3d(tibia_length, 0, 0), parent=self.tibia_frame
         )
 
     def set_foot_pos(self, position: Vec3d):
@@ -122,7 +124,7 @@ class Leg:
         self.femur_control.update()
         self.tibia_control.update()
 
-    def _calculate_ik(self, position: Vec3d) -> tuple[float, float, float]:
+    def _calculate_ik(self, position: Vec3d) -> list[float]:
         """
         Calculates the angles from the leg hip joint to the tip point in 3d space,
         with x axis being parallel to the ground plane, perpindicular to the mount point.
@@ -131,38 +133,33 @@ class Leg:
         fem_len = self.femur_length
         tib_len = self.tibia_length
 
-        a1 = math.degrees(math.atan2(position.y, position.x))
+        vec2 = Vec2d(position.x, position.y)
 
-        xyH = max(0, math.sqrt(position.y**2 + position.x**2) - cox_len)
-        zH = math.sqrt(position.z**2 + xyH**2)
+        a1 = vec2.angle_x()
+
+        xy_len = max(0, vec2.length() - cox_len)
+        zH = Vec2d(position.z, xy_len).length()
 
         max_reach = fem_len + tib_len
         # Clamp reach distance to maximum if it exceeds (with small tolerance)
         if zH > max_reach + 1e-6:
             # Scale the position vector to be within reach
             # Keep the direction, just reduce the magnitude
-            position_mag = math.sqrt(position.x**2 + position.y**2 + position.z**2)
+            position_mag = position.length()
             if position_mag > 0:
                 # Calculate what the max reachable distance is from coxa
-                max_position_mag = cox_len + max_reach
-                scale_factor = max_position_mag / position_mag
-                position = Vec3d(
-                    position.x * scale_factor,
-                    position.y * scale_factor,
-                    position.z * scale_factor,
-                )
+                # TODO: This doesn't factor in the rigid Z axis of the coxa.
+                direction = position.normalize()
+                position = direction * (cox_len + max_reach)
                 # Recalculate after scaling
-                xyH = max(0, math.sqrt(position.y**2 + position.x**2) - cox_len)
-                zH = math.sqrt(position.z**2 + xyH**2)
+                xy_len = max(0, Vec2d(position.x, position.y).length() - cox_len)
+                zH = Vec2d(position.z, xy_len).length()
 
-        z_theta = math.atan2(position.z, xyH)
         a2cos = (fem_len**2 + zH**2 - tib_len**2) / (2 * fem_len * zH)
-        a2cos = max(-1.0, min(1.0, a2cos))
-
-        a2 = math.degrees(math.acos(a2cos) + z_theta)
+        a2 = math.acos(max(-1.0, min(1.0, a2cos)))
+        a2 = a2 + math.atan2(position.z, xy_len)
 
         a3cos = (fem_len**2 + tib_len**2 - zH**2) / (2 * tib_len * fem_len)
-        a3cos = max(-1.0, min(1.0, a3cos))
-        a3 = math.degrees(math.acos(a3cos))
+        a3 = math.acos(max(-1.0, min(1.0, a3cos)))
 
-        return (a1, a2, a3)
+        return [math.degrees(a) for a in [a1, a2, a3]]
