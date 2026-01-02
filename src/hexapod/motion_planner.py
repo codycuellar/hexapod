@@ -25,8 +25,8 @@ class GaitState(Enum):
 
 class TripodGait:
     leg_relative_position = Vec3d(150, 0, -60)
-    max_velocity = 240.0  # mm/s
-    gait_radius = 60.0  # mm
+    max_velocity = 250.0  # mm/s
+    gait_radius = 55.0  # mm
     step_height = 25.0  # mm
 
     # max_rotation_angle = 20  # +/- degrees
@@ -127,12 +127,6 @@ class TripodGait:
         if dist_out_of_radius > 0.0:
             self._flip_groups()
             return
-            stride_pos_next = stride_pos_next.normalize() * (
-                self.gait_radius - dist_out_of_radius
-            )
-            swing_pos_next = -stride_pos_next
-            # update distance from center after clamping
-            dist_out_of_radius = stride_pos_next.length() - self.gait_radius
 
         for frame in list(self.stride_group.values()) + [self.stride_ref]:
             frame.origin = stride_pos_next
