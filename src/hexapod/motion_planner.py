@@ -25,9 +25,9 @@ class GaitState(Enum):
 
 class TripodGait:
     leg_relative_position = Vec3d(150, 0, -60)
-    max_velocity = 120  # mm/s
-    gait_radius = 25  # mm
-    step_height = 25  # mm
+    max_velocity = 240.0  # mm/s
+    gait_radius = 60.0  # mm
+    step_height = 25.0  # mm
 
     # max_rotation_angle = 20  # +/- degrees
     # max_rotation_speed = 45  # deg/s
@@ -43,8 +43,14 @@ class TripodGait:
         self.last_nonzero_vector = Vec2d()
         self.rotation_velocity = 0.0
 
+        stride_ref_parent = Frame()
+        self.stride_ref = Frame(parent=stride_ref_parent)
+        swing_ref_parent = Frame()
+        self.swing_ref = Frame(parent=swing_ref_parent)
+
         offset = Vec3d(220, 0, 0)
         rm_direction_frame = Frame(offset, parent=self.stride_control)
+
         lf_direction_frame = Frame(
             Rotation.degrees(z=120) @ offset, parent=self.stride_control
         )
@@ -88,49 +94,65 @@ class TripodGait:
         self.rotation_velocity = min(1.0, max(-1.0, rotation_velocity))
 
     def step(self, dt: float):
-        velocity = self.gait_vector.length() * self.max_velocity
-        distance_to_move = velocity * dt
+        # get the current stride position
+        pos_current = self.stride_ref.get_origin_in_world()
 
-        foot_pos: Vec3d
-        foot_angle = self.last_nonzero_vector.degree_y()
+        # the max distance we can step this frame in world pos based on
+        # max velocity
+        max_step_dist = self.max_velocity * dt
 
-        for frame in self.stride_group.values():
-            if not frame.parent:
-                raise ValueError("Incorrect gait setup, no parent for foot frame.")
-            frame.parent.rotation = Rotation.degrees(z=foot_angle)
-            frame.origin -= Vec3d(y=distance_to_move)
-            foot_pos = frame.origin
+        vec_norm = self.last_nonzero_vector.normalize().to_3d()
 
-        for frame in self.swing_group.values():
-            if not frame.parent:
-                raise ValueError("Incorrect gait setup, no parent for foot frame.")
-            frame.parent.rotation = Rotation.degrees(z=foot_angle)
-            frame.origin += Vec3d(y=distance_to_move)
+        # project the last position onto the new vector at the perpindicular
+        # intersection point.
+        projection = vec_norm * (pos_current @ vec_norm)
 
-        phase = abs(self.gait_radius - foot_pos.y) / (self.gait_radius * 2)
-        if phase >= 1.0:
+        # calculate the delta vector along the axis of the current gait direction
+        # that we should try to step from the projected point.
+        delta_step = -self.gait_vector.to_3d() * max_step_dist
+        stride_pos_next = projection + delta_step
+
+        # Check the total distance we're attempting to travel, and clamp it to
+        # the max distance we're allowed to step this frame to satisfy max velocity.
+        world_distance = stride_pos_next - pos_current
+        if world_distance.length() > max_step_dist:
+            world_distance = world_distance.normalize() * max_step_dist
+
+        stride_pos_next = pos_current + world_distance
+        swing_pos_next = -stride_pos_next
+
+        # if we've exited the stride radius, flip the groups and use the distance
+        # we are outside the radius as the starting distance from the radius edge.
+        dist_out_of_radius = stride_pos_next.length() - self.gait_radius
+        if dist_out_of_radius > 0.0:
             self._flip_groups()
+            return
+            stride_pos_next = stride_pos_next.normalize() * (
+                self.gait_radius - dist_out_of_radius
+            )
+            swing_pos_next = -stride_pos_next
+            # update distance from center after clamping
+            dist_out_of_radius = stride_pos_next.length() - self.gait_radius
 
-        # ease on start, top, and back down to bottom.
-        z = self.step_height * 0.5 * (1 - math.cos(2 * math.pi * phase))
+        for frame in list(self.stride_group.values()) + [self.stride_ref]:
+            frame.origin = stride_pos_next
+
+        for frame in list(self.swing_group.values()) + [self.swing_ref]:
+            frame.origin = swing_pos_next
+
+        z = self.step_height * abs(dist_out_of_radius / self.gait_radius)
         self.swing_control.origin = Vec3d(z=self.leg_relative_position.z + z)
 
     def _flip_groups(self):
-        swing_c = self.swing_control
-        swing_g = self.swing_group
+        swing_ref = self.swing_ref
+        swing_control = self.swing_control
+        swing_group = self.swing_group
+        self.swing_ref = self.stride_ref
         self.swing_control = self.stride_control
         self.swing_group = self.stride_group
-        self.stride_control = swing_c
-        self.stride_group = swing_g
-
-        self.stride_control.origin = self.stride_control_start
-        self.swing_control.origin = -self.stride_control_start
-
-        for frame in self.stride_group.values():
-            frame.origin = Vec3d(y=self.gait_radius)
-
-        for frame in self.swing_group.values():
-            frame.origin = Vec3d(y=-self.gait_radius)
+        self.stride_ref = swing_ref
+        self.stride_control = swing_control
+        self.stride_group = swing_group
 
 
 class MotionPlanner:

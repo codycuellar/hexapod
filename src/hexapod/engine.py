@@ -53,6 +53,9 @@ class Vec2d(Vector):
     def degree_y(self) -> float:
         return math.degrees(self.angle_y())
 
+    def to_3d(self):
+        return Vec3d(self._data[0], self._data[1])
+
 
 class Vec3d(Vector):
     def __init__(self, x: float = 0.0, y: float = 0.0, z: float = 0.0):
@@ -101,6 +104,9 @@ class Vec3d(Vector):
 
     def to_transform(self):
         return Transform.create(translation=self)
+
+    def to_2d(self):
+        return Vec2d(self.x, self.y)
 
 
 class Rotation(Matrix):
@@ -255,10 +261,10 @@ class Transform(Matrix):
             self._data[i][3] = translation[i]
 
     def rotate(self, rotation: Rotation) -> "Transform":
-        return self @ rotation.to_transform()
+        return Transform.create(rotation=self.rotation @ rotation)
 
     def translate(self, translation: Vec3d) -> "Transform":
-        return self @ translation.to_transform()
+        return Transform.create(translation=(self @ translation))
 
     def inverse(self) -> "Transform":
         rot_inv = self.rotation.inverse()
