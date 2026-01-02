@@ -53,6 +53,12 @@ class Vec2d(Vector):
     def degree_y(self) -> float:
         return math.degrees(self.angle_y())
 
+    def rotate(self, deg: float):
+        rad = math.radians(deg)
+        cos_r = math.cos(rad)
+        sin_r = math.sin(rad)
+        return Vec2d(self.x * cos_r - self.y * sin_r, self.x * sin_r + self.y * cos_r)
+
     def to_3d(self):
         return Vec3d(self._data[0], self._data[1])
 

@@ -95,13 +95,13 @@ class TripodGait:
 
     def step(self, dt: float):
         # get the current stride position
-        pos_current = self.stride_ref.get_origin_in_world()
+        pos_current = self.stride_ref.get_origin_in_world().to_2d()
 
         # the max distance we can step this frame in world pos based on
         # max velocity
         max_step_dist = self.max_velocity * dt
 
-        vec_norm = self.last_nonzero_vector.normalize().to_3d()
+        vec_norm = self.last_nonzero_vector.normalize()
 
         # project the last position onto the new vector at the perpindicular
         # intersection point.
@@ -109,8 +109,12 @@ class TripodGait:
 
         # calculate the delta vector along the axis of the current gait direction
         # that we should try to step from the projected point.
-        delta_step = -self.gait_vector.to_3d() * max_step_dist
+        delta_step = -self.gait_vector * max_step_dist
         stride_pos_next = projection + delta_step
+        if self.rotation_velocity != 0.0:
+            stride_pos_next = stride_pos_next.rotate(
+                max_step_dist / self.leg_relative_position.to_2d().length()
+            )
 
         # Check the total distance we're attempting to travel, and clamp it to
         # the max distance we're allowed to step this frame to satisfy max velocity.
@@ -129,10 +133,10 @@ class TripodGait:
             return
 
         for frame in list(self.stride_group.values()) + [self.stride_ref]:
-            frame.origin = stride_pos_next
+            frame.origin = stride_pos_next.to_3d()
 
         for frame in list(self.swing_group.values()) + [self.swing_ref]:
-            frame.origin = swing_pos_next
+            frame.origin = swing_pos_next.to_3d()
 
         z = self.step_height * abs(dist_out_of_radius / self.gait_radius)
         self.swing_control.origin = Vec3d(z=self.leg_relative_position.z + z)
