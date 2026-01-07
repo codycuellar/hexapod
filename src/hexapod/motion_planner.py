@@ -173,12 +173,16 @@ class TripodGait:
             if step_radius > self.gait_radius:
                 self._queue_swing(group)
 
-            # clamp to outer working area if we're still waiting for the other
-            # group to complete its swing.
-            # TODO: Ease filter this into the extreme outer limit.
-            if step_radius >= self.gait_radius_max:
-                next_position = current_position
-                print(f"waiting for swing, clipping motion to {next_position}")
+                # clamp to outer working area if we're still waiting for the other
+                # group to complete its swing.
+                t = (step_radius - self.gait_radius) / (
+                    self.gait_radius_max - self.gait_radius
+                )
+                t = min(max(t, 0.0), 1.0)
+
+                # smoothstep easing
+                ease = 1.0 - (3 * t * t - 2 * t * t * t)
+                next_position = current_position + step_vector * ease
 
             group.origin = next_position
 
