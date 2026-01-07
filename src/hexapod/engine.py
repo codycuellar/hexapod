@@ -377,6 +377,13 @@ class Frame:
         self._set_dirty()
         return self
 
+    def rotate_about(self, reference: "Frame", rotation: Rotation) -> "Frame":
+        local_pos = reference.world_pos_to_local(self.get_origin_in_world())
+        rotated_local_pos = rotation @ local_pos
+        self.origin = reference.local_pos_to_world(rotated_local_pos)
+        self.rotate(rotation)
+        return self
+
     def get_origin_in_world(self) -> Vec3d:
         return self._get_transform_from_world().translation
 
