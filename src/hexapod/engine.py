@@ -185,7 +185,7 @@ class Rotation(Matrix):
     def __matmul__(self, other: "Rotation") -> "Rotation": ...
     @overload
     def __matmul__(self, other: Vec3d) -> Vec3d: ...
-    def __matmul__(self, other):
+    def __matmul__(self, other: "Rotation | Vec3d"):
         if isinstance(other, Rotation):
             return Rotation(super().__matmul__(other).to_list())
         else:

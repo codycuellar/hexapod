@@ -30,17 +30,21 @@ class TripodGait:
     step_height = 25.0  # mm
     rest_time = 1.0  # seconds
 
+    max_gait_accel = 4.0  # change/seconds
+
     # max_rotation_angle = 20  # +/- degrees
     # max_rotation_speed = 45  # deg/s
 
     def __init__(self, reference_frame: Frame, leg_offset: Vec3d):
         self.state = GaitState.STANDING
+        self.time_resting = 0.0
+
         self.gait_vector = Vec3d()  # normalized to unit-range
+        self.previous_gait_vector = Vec3d()
+
         self.rotation_velocity = 0.0  # unit-range factor
 
-        self.time_resting = 0.0
         self.leg_swinging = False
-
         self.swing_phase = 0.0
         self.swing_path = (Vec3d(), Vec3d(), Vec3d(), Vec3d())
         self.swing_distance = 0.0
@@ -70,15 +74,17 @@ class TripodGait:
     def update(self, gait_vector: Vec3d, rotation_velocity: float):
         l = gait_vector.length()
         if l > 1.0:
+            # clamp to unit range just in case
             gait_vector /= l
-        self.gait_vector = gait_vector
 
-        if l > 0.0:
-            self.last_nonzero_vector = gait_vector
+        self.previous_gait_vector = self.gait_vector
+        self.gait_vector = gait_vector
 
         self.rotation_velocity = min(1.0, max(-1.0, rotation_velocity))
 
     def step(self, dt: float):
+        self._filter_gait_vector(dt)
+
         gait_magnitude = self.gait_vector.length()
 
         if self.state == GaitState.STANDING:
@@ -89,11 +95,13 @@ class TripodGait:
 
         elif self.state == GaitState.WALKING:
             # we're not receiving inputs
-            if gait_magnitude == 0.0:
-                self._queue_rest_position(dt)
-
             if self.leg_swinging:
                 self._perform_swing(dt)
+
+            elif gait_magnitude == 0.0:
+                print("at rest")
+                self._queue_rest_position(dt)
+                return
 
             self._perform_stride(dt, gait_magnitude)
 
@@ -101,8 +109,10 @@ class TripodGait:
         if not self.swing_group:
             raise ValueError("Leg swing performed, but no swing group assigned.")
 
-        scaled_velocity = self.max_swing_velocity * max(0.3, self.gait_vector.length())
+        print(f"swing rate {self.gait_vector.length()}")
+        scaled_velocity = self.max_swing_velocity * max(0.4, self.gait_vector.length())
         self.swing_phase += (scaled_velocity * dt) / self.swing_distance
+
         pos = cubic_bez_3d(min(1.0, self.swing_phase), *self.swing_path)
         self.swing_group.origin = pos
         if self.swing_phase >= 1.0:
@@ -174,7 +184,7 @@ class TripodGait:
         if self.time_resting <= self.rest_time:
             return
 
-        # pick the stride group with the largest displacement
+        # pick the stride group with the largest displacement from origin
         group = max(
             self.stride_groups,
             key=lambda g: g.origin.length(),
@@ -182,11 +192,30 @@ class TripodGait:
         )
 
         if group and group.origin.length() > 0.0:
-            print(f"queueing rest")
+            print(f"queueing rest {group}")
             self._queue_swing(group)
         else:
-            self.time_resting = 0.0
+            print(f"ending rest")
             self.state = GaitState.STANDING
+            self.time_resting = 0.0
+
+    def _filter_gait_vector(self, dt: float):
+        next = self.gait_vector
+        current = self.previous_gait_vector
+
+        max_change = self.max_gait_accel * dt
+
+        delta = next - current
+        delta_len = delta.length()
+
+        if delta_len == 0.0 or delta_len < max_change:
+            return
+        else:
+            delta = delta * (max_change / delta_len)
+
+        self.gait_vector = self.previous_gait_vector + delta
+
+        print(f"filtering gait vector:{next} to {self.gait_vector}")
 
 
 class MotionPlanner:
