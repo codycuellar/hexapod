@@ -42,7 +42,8 @@ class Vector:
         return f"{self.__class__.__name__}({self.to_list()})"
 
     def __str__(self) -> str:
-        return f"{self.to_list()}"
+        vals = [f"{v:.04f}" for v in self.to_list()]
+        return f"{self.__class__.__name__}({', '.join(vals)})"
 
     def length(self):
         return math.sqrt(sum(self[i] ** 2 for i in range(len(self))))

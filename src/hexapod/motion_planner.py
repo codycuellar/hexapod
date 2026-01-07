@@ -22,8 +22,7 @@ class GaitState(Enum):
 
 
 class TripodGait:
-    target_gait_radius = 35.0  # mm
-    gait_radius = target_gait_radius  # the scaled radius
+    gait_radius = 35.0  # mm
     gait_radius_max = 60.0
     max_velocity = 175.0  # mm/s
     max_swing_velocity = 250.0  # mm/s
@@ -31,25 +30,28 @@ class TripodGait:
     step_height = 25.0  # mm
     rest_time = 0.75  # seconds
     max_rotation_angle = 15  # +/- degrees
-    max_rotation_speed = 15  # deg/s
-    min_swing_time = 0.15
+    max_rotation_speed = 15  # deg/second
+    min_swing_time = 0.15  # seconds
+    swing_radius_scale = 0.9  # unit vector scale
+    min_speed_scale = 0.2  # seconds
+    rest_swing_duration = 0.35  # seconds
 
     def __init__(self, reference_frame: Frame, leg_offset: Vec3d):
         self.state = GaitState.STANDING
         self.time_resting = 0.0
 
         self.gait_vector = Vec3d()  # normalized to unit-range
+        self.gait_direction = self.gait_vector
+        self.gait_magnitude = 0.0
         self.previous_gait_vector = Vec3d()
 
         self.rotation_velocity = 0.0  # unit-range factor
 
-        self.leg_swinging = False
         self.swing_phase = 0.0
         self.swing_elapsed = 0.0
         self.swing_duration = 0.0
         self.swing_path = (Vec3d(), Vec3d(), Vec3d(), Vec3d())
         self.swing_rotation = 0.0
-        self.swing_target_radius = 0.0
 
         self.reference_frame = reference_frame
         self.control_a = Frame(parent=reference_frame)
@@ -67,6 +69,10 @@ class TripodGait:
             LegID.LM: Frame(rd(z=180) @ leg_offset, parent=self.control_b),
             LegID.RB: Frame(rd(z=-60) @ leg_offset, parent=self.control_b),
         }
+
+    @property
+    def leg_swinging(self):
+        return self.swing_group is not None
 
     def get_foot_global_positions(self):
         return {
@@ -88,10 +94,8 @@ class TripodGait:
     def step(self, dt: float):
         self._filter_gait_vector(dt)
 
-        gait_magnitude = self.gait_vector.length()
-
         if self.state == GaitState.STANDING:
-            if gait_magnitude > 0.0 or self.rotation_velocity != 0.0:
+            if self.gait_magnitude > 0.0 or self.rotation_velocity != 0.0:
                 self.state = GaitState.WALKING
                 self._queue_swing(self.stride_groups[0])
 
@@ -100,10 +104,11 @@ class TripodGait:
             if self.leg_swinging:
                 self._perform_swing(dt)
 
-            if gait_magnitude > 0.0:
-                self._perform_stride(dt, gait_magnitude)
+            if self.gait_magnitude > 0.0:
+                self.time_resting = 0.0
+                self._perform_stride(dt, self.gait_magnitude)
 
-            if not self.leg_swinging and gait_magnitude == 0.0:
+            if not self.leg_swinging and self.gait_magnitude == 0.0:
                 self._queue_rest_position(dt)
                 return
 
@@ -125,21 +130,16 @@ class TripodGait:
         if self.swing_group:
             return
 
-        self.leg_swinging = True
         self.swing_group = group
         self.stride_groups.remove(group)
-        self.swing_target_radius = self.gait_radius
         self.swing_phase = 0.0
         self.swing_elapsed = 0.0
 
         start = group.origin
         if not end:
-            end = self.gait_vector.normalize() * self.gait_radius * 0.9
+            end = self.gait_direction * self.gait_radius * self.swing_radius_scale
 
         distance = start.distance_to(end)
-
-        # height = (distance / (self.gait_radius * 2)) * self.step_height
-        # height = max(height, self.step_height / 2)
 
         self.swing_path = (
             start,
@@ -148,9 +148,9 @@ class TripodGait:
             end,
         )
         if is_rest:
-            self.swing_duration = 0.5
+            self.swing_duration = self.rest_swing_duration
         else:
-            speed_scale = max(self.gait_vector.length(), 0.2)
+            speed_scale = max(self.gait_magnitude, self.min_speed_scale)
             effective_swing_velocity = self.max_swing_velocity * speed_scale
             self.swing_duration = max(
                 distance / effective_swing_velocity, self.min_swing_time
@@ -161,7 +161,7 @@ class TripodGait:
             # get the current stride position
             current_position = group.origin
 
-            gait_dir = self.gait_vector.normalize()
+            gait_dir = self.gait_direction
             max_step_distance = self.max_velocity * gait_magnitude * dt
 
             step_vector = -gait_dir * max_step_distance
@@ -170,7 +170,7 @@ class TripodGait:
             # if we've exited the inner stride radius, trigger a swing if possible
             step_radius = next_position.length()
 
-            if step_radius > self.swing_target_radius:
+            if step_radius > self.gait_radius:
                 self._queue_swing(group)
 
             # clamp to outer working area if we're still waiting for the other
@@ -183,7 +183,6 @@ class TripodGait:
             group.origin = next_position
 
     def _end_swing(self):
-        self.leg_swinging = False
         if self.swing_group:
             self.stride_groups.append(self.swing_group)
         self.swing_group = None
@@ -211,11 +210,6 @@ class TripodGait:
         Filters the raw input vector so it cannot surpass a specified max
         rate of change.
         """
-        # if not self.leg_swinging:
-        #     self.gait_radius = self.target_gait_radius * max(
-        #         0.3, self.gait_vector.length()
-        #     )
-
         next = self.gait_vector
         current = self.previous_gait_vector
 
@@ -224,13 +218,12 @@ class TripodGait:
         delta = next - current
         delta_len = delta.length()
 
-        if delta_len == 0.0 or delta_len < max_change:
-            return
-        else:
+        if delta_len > 0.0 and delta_len > max_change:
             delta = delta * (max_change / delta_len)
+            self.gait_vector = self.previous_gait_vector + delta
 
-        self.gait_vector = self.previous_gait_vector + delta
-        print(self.gait_vector)
+        self.gait_direction = self.gait_vector.normalize()
+        self.gait_magnitude = self.gait_vector.length()
 
 
 class MotionPlanner:
@@ -287,18 +280,6 @@ class MotionPlanner:
         self.body_roll_offset = rotation
 
     def step(self, dt: float):
-        # TODO: Accumulate inactive motion time.
-
-        # if self.transitioning:
-        #     self._do_transition(dt)
-        # else:
-        # velocity = self.gait_vector.length()
-        # if self.state != GaitState.WALKING and velocity > 0:
-        #     print("going to walking")
-        #     self._start_transition(GaitState.WALKING)
-        # elif self.state != GaitState.STANDING and velocity == 0:
-        #     self._start_transition(GaitState.STANDING)
-        # else:
         self.gait.step(dt)
         positions = self.gait.get_foot_global_positions()
         for id, pos in positions.items():
