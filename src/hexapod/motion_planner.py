@@ -22,15 +22,18 @@ class GaitState(Enum):
 
 
 class TripodGait:
-    leg_relative_position = Vec3d(150, 0, -60)
-    max_swing_velocity = 250.0  # mm/s
-    max_velocity = 150.0  # mm/s
-    gait_radius = 35.0  # mm
+    target_gait_radius = 35.0  # mm
+    gait_radius = target_gait_radius  # the scaled radius
     gait_radius_max = 55.0
-    step_height = 25.0  # mm
-    rest_time = 1.0  # seconds
 
-    max_gait_accel = 4.0  # change/seconds
+    max_velocity = 200.0  # mm/s
+    max_swing_velocity = 250.0  # mm/s
+
+    input_filter_rate = 4.0  # change/seconds
+
+    step_height = 25.0  # mm
+
+    rest_time = 1.0  # seconds
 
     # max_rotation_angle = 20  # +/- degrees
     # max_rotation_speed = 45  # deg/s
@@ -90,16 +93,13 @@ class TripodGait:
         if self.state == GaitState.STANDING:
             if gait_magnitude > 0.0:
                 self.state = GaitState.WALKING
-                print("initial swing")
                 self._queue_swing(self.stride_groups[0])
 
         elif self.state == GaitState.WALKING:
             # we're not receiving inputs
             if self.leg_swinging:
                 self._perform_swing(dt)
-
             elif gait_magnitude == 0.0:
-                print("at rest")
                 self._queue_rest_position(dt)
                 return
 
@@ -109,14 +109,12 @@ class TripodGait:
         if not self.swing_group:
             raise ValueError("Leg swing performed, but no swing group assigned.")
 
-        print(f"swing rate {self.gait_vector.length()}")
         scaled_velocity = self.max_swing_velocity * max(0.4, self.gait_vector.length())
         self.swing_phase += (scaled_velocity * dt) / self.swing_distance
 
         pos = cubic_bez_3d(min(1.0, self.swing_phase), *self.swing_path)
         self.swing_group.origin = pos
         if self.swing_phase >= 1.0:
-            print(f"ending swing - {pos}")
             self._end_swing()
 
     def _perform_stride(self, dt: float, gait_magnitude: float):
@@ -137,7 +135,6 @@ class TripodGait:
             # we are outside the radius as the starting distance from the radius edge.
             step_radius = next_position.length()
             if step_radius > self.gait_radius:
-                print(f"leg outside of radius {step_radius} - {next_position}")
                 self._queue_swing(group)
 
             if step_radius >= self.gait_radius_max:
@@ -150,9 +147,8 @@ class TripodGait:
         if self.swing_group:
             return
 
-        gait_len = max(0.5, self.gait_vector.length())
         start = group.origin
-        end = self.gait_vector.normalize() * gait_len * self.gait_radius
+        end = self.gait_vector.normalize() * self.gait_radius
 
         self.leg_swinging = True
         self.swing_group = group
@@ -168,7 +164,6 @@ class TripodGait:
             Vec3d(end.x, end.y, end.z + height),
             end,
         )
-        print(f"swing start {start}, end {end}, height: {height}")
 
     def _end_swing(self):
         self.leg_swinging = False
@@ -180,10 +175,10 @@ class TripodGait:
         self.swing_distance = 0.0
 
     def _queue_rest_position(self, dt: float):
+        """Initiate the rest position of the legs."""
         self.time_resting += dt
         if self.time_resting <= self.rest_time:
             return
-
         # pick the stride group with the largest displacement from origin
         group = max(
             self.stride_groups,
@@ -192,18 +187,20 @@ class TripodGait:
         )
 
         if group and group.origin.length() > 0.0:
-            print(f"queueing rest {group}")
             self._queue_swing(group)
         else:
-            print(f"ending rest")
             self.state = GaitState.STANDING
             self.time_resting = 0.0
 
     def _filter_gait_vector(self, dt: float):
+        """
+        Filters the raw input vector so it cannot surpass a specified max
+        rate of change.
+        """
         next = self.gait_vector
         current = self.previous_gait_vector
 
-        max_change = self.max_gait_accel * dt
+        max_change = self.input_filter_rate * dt
 
         delta = next - current
         delta_len = delta.length()
@@ -214,8 +211,7 @@ class TripodGait:
             delta = delta * (max_change / delta_len)
 
         self.gait_vector = self.previous_gait_vector + delta
-
-        print(f"filtering gait vector:{next} to {self.gait_vector}")
+        self.gait_radius = self.target_gait_radius * max(0.3, self.gait_vector.length())
 
 
 class MotionPlanner:
