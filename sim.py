@@ -115,8 +115,7 @@ def main():
         motion_planner.step(DT)
 
         draw_hexapod(ax, hexapod, leg_lines, body_line)
-        fig.canvas.draw_idle()
-        fig.canvas.flush_events()
+        fig.canvas.draw()
         plt.pause(0.001)  # <-- GUI event pump only
 
         next_time += DT

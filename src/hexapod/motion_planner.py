@@ -8,13 +8,11 @@ The controller's job is to:
 4. Coordinate leg movements over time
 """
 
-import math
-
 from enum import Enum, auto
 
 from hexapod.hexpod import Body, LegID
 from hexapod.engine import Vec3d, Vec2d, Frame, Rotation
-from hexapod.interpolation import lerp_3d
+from hexapod.interpolation import lerp_3d, cubic_bez_3d
 
 
 class GaitState(Enum):
@@ -25,64 +23,51 @@ class GaitState(Enum):
 
 class TripodGait:
     leg_relative_position = Vec3d(150, 0, -60)
-    max_velocity = 250.0  # mm/s
-    gait_radius = 55.0  # mm
+    max_swing_velocity = 250.0  # mm/s
+    max_velocity = 150.0  # mm/s
+    gait_radius = 35.0  # mm
+    gait_radius_max = 55.0
     step_height = 25.0  # mm
+    rest_time = 1.0  # seconds
 
     # max_rotation_angle = 20  # +/- degrees
     # max_rotation_speed = 45  # deg/s
 
-    stride_control_start = Vec3d(z=leg_relative_position.z)
-    swing_control_start = Vec3d(z=leg_relative_position.z + step_height)
+    def __init__(self, reference_frame: Frame, leg_offset: Vec3d):
+        self.state = GaitState.STANDING
+        self.gait_vector = Vec3d()  # normalized to unit-range
+        self.rotation_velocity = 0.0  # unit-range factor
 
-    def __init__(self):
-        self.stride_control = Frame(origin=self.stride_control_start)
-        self.swing_control = Frame(origin=-self.stride_control_start)
+        self.time_resting = 0.0
+        self.leg_swinging = False
 
-        self.gait_vector = Vec2d()
-        self.last_nonzero_vector = Vec2d()
-        self.rotation_velocity = 0.0
+        self.swing_phase = 0.0
+        self.swing_path = (Vec3d(), Vec3d(), Vec3d(), Vec3d())
+        self.swing_distance = 0.0
 
-        stride_ref_parent = Frame()
-        self.stride_ref = Frame(parent=stride_ref_parent)
-        swing_ref_parent = Frame()
-        self.swing_ref = Frame(parent=swing_ref_parent)
+        self.control_a = Frame(parent=reference_frame)
+        self.control_b = Frame(parent=reference_frame)
 
-        offset = Vec3d(220, 0, 0)
-        rm_direction_frame = Frame(offset, parent=self.stride_control)
+        self.swing_group: Frame | None = None
+        self.stride_groups: list[Frame] = [self.control_a, self.control_b]
 
-        lf_direction_frame = Frame(
-            Rotation.degrees(z=120) @ offset, parent=self.stride_control
-        )
-        lb_direction_frame = Frame(
-            Rotation.degrees(z=-120) @ offset, parent=self.stride_control
-        )
-        rf_direction_frame = Frame(
-            Rotation.degrees(z=60) @ offset, parent=self.swing_control
-        )
-        lm_direction_frame = Frame(
-            Rotation.degrees(z=180) @ offset, parent=self.swing_control
-        )
-        rb_direction_frame = Frame(
-            Rotation.degrees(z=-60) @ offset, parent=self.swing_control
-        )
-
-        self.stride_group = {
-            LegID.RM: Frame(parent=rm_direction_frame),
-            LegID.LF: Frame(parent=lf_direction_frame),
-            LegID.LB: Frame(parent=lb_direction_frame),
-        }
-        self.swing_group = {
-            LegID.RF: Frame(parent=rf_direction_frame),
-            LegID.LM: Frame(parent=lm_direction_frame),
-            LegID.RB: Frame(parent=rb_direction_frame),
+        rd = Rotation.degrees
+        self.leg_frames = {
+            LegID.RM: Frame(leg_offset, parent=self.control_a),
+            LegID.LF: Frame(rd(z=120) @ leg_offset, parent=self.control_a),
+            LegID.LB: Frame(rd(z=-120) @ leg_offset, parent=self.control_a),
+            LegID.RF: Frame(rd(z=60) @ leg_offset, parent=self.control_b),
+            LegID.LM: Frame(rd(z=180) @ leg_offset, parent=self.control_b),
+            LegID.RB: Frame(rd(z=-60) @ leg_offset, parent=self.control_b),
         }
 
     def get_foot_global_positions(self):
-        legs = list(self.stride_group.items()) + list(self.swing_group.items())
-        return {leg_id: frame.get_origin_in_world() for leg_id, frame in legs}
+        return {
+            leg_id: frame.get_origin_in_world()
+            for leg_id, frame in self.leg_frames.items()
+        }
 
-    def update(self, gait_vector: Vec2d, rotation_velocity: float):
+    def update(self, gait_vector: Vec3d, rotation_velocity: float):
         l = gait_vector.length()
         if l > 1.0:
             gait_vector /= l
@@ -94,63 +79,114 @@ class TripodGait:
         self.rotation_velocity = min(1.0, max(-1.0, rotation_velocity))
 
     def step(self, dt: float):
-        # get the current stride position
-        pos_current = self.stride_ref.get_origin_in_world().to_2d()
+        gait_magnitude = self.gait_vector.length()
 
-        # the max distance we can step this frame in world pos based on
-        # max velocity
-        max_step_dist = self.max_velocity * dt
+        if self.state == GaitState.STANDING:
+            if gait_magnitude > 0.0:
+                self.state = GaitState.WALKING
+                print("initial swing")
+                self._queue_swing(self.stride_groups[0])
 
-        vec_norm = self.last_nonzero_vector.normalize()
+        elif self.state == GaitState.WALKING:
+            # we're not receiving inputs
+            if gait_magnitude == 0.0:
+                self._queue_rest_position(dt)
 
-        # project the last position onto the new vector at the perpindicular
-        # intersection point.
-        projection = vec_norm * (pos_current @ vec_norm)
+            if self.leg_swinging:
+                self._perform_swing(dt)
 
-        # calculate the delta vector along the axis of the current gait direction
-        # that we should try to step from the projected point.
-        delta_step = -self.gait_vector * max_step_dist
-        stride_pos_next = projection + delta_step
-        if self.rotation_velocity != 0.0:
-            stride_pos_next = stride_pos_next.rotate(
-                max_step_dist / self.leg_relative_position.to_2d().length()
-            )
+            self._perform_stride(dt, gait_magnitude)
 
-        # Check the total distance we're attempting to travel, and clamp it to
-        # the max distance we're allowed to step this frame to satisfy max velocity.
-        world_distance = stride_pos_next - pos_current
-        if world_distance.length() > max_step_dist:
-            world_distance = world_distance.normalize() * max_step_dist
+    def _perform_swing(self, dt: float):
+        if not self.swing_group:
+            raise ValueError("Leg swing performed, but no swing group assigned.")
 
-        stride_pos_next = pos_current + world_distance
-        swing_pos_next = -stride_pos_next
+        scaled_velocity = self.max_swing_velocity * max(0.3, self.gait_vector.length())
+        self.swing_phase += (scaled_velocity * dt) / self.swing_distance
+        pos = cubic_bez_3d(min(1.0, self.swing_phase), *self.swing_path)
+        self.swing_group.origin = pos
+        if self.swing_phase >= 1.0:
+            print(f"ending swing - {pos}")
+            self._end_swing()
 
-        # if we've exited the stride radius, flip the groups and use the distance
-        # we are outside the radius as the starting distance from the radius edge.
-        dist_out_of_radius = stride_pos_next.length() - self.gait_radius
-        if dist_out_of_radius > 0.0:
-            self._flip_groups()
+    def _perform_stride(self, dt: float, gait_magnitude: float):
+        for group in self.stride_groups:
+            # get the current stride position
+            current_position = group.origin
+
+            gait_dir = self.gait_vector.normalize()
+            max_step_distance = self.max_velocity * gait_magnitude * dt
+
+            # Clamp the motion vector to the max step distance if needed.
+            step_vector = -gait_dir * max_step_distance
+
+            # don't allow the step to travel past step_radius_max
+            next_position = current_position + step_vector
+
+            # if we've exited the stride radius, flip the groups and use the distance
+            # we are outside the radius as the starting distance from the radius edge.
+            step_radius = next_position.length()
+            if step_radius > self.gait_radius:
+                print(f"leg outside of radius {step_radius} - {next_position}")
+                self._queue_swing(group)
+
+            if step_radius >= self.gait_radius_max:
+                next_position = current_position
+                print(f"clipping motion to {next_position}")
+
+            group.origin = next_position
+
+    def _queue_swing(self, group: Frame):
+        if self.swing_group:
             return
 
-        for frame in list(self.stride_group.values()) + [self.stride_ref]:
-            frame.origin = stride_pos_next.to_3d()
+        gait_len = max(0.5, self.gait_vector.length())
+        start = group.origin
+        end = self.gait_vector.normalize() * gait_len * self.gait_radius
 
-        for frame in list(self.swing_group.values()) + [self.swing_ref]:
-            frame.origin = swing_pos_next.to_3d()
+        self.leg_swinging = True
+        self.swing_group = group
+        self.stride_groups.remove(group)
+        self.swing_distance = start.distance_to(end)
 
-        z = self.step_height * abs(dist_out_of_radius / self.gait_radius)
-        self.swing_control.origin = Vec3d(z=self.leg_relative_position.z + z)
+        height = (start.distance_to(end) / (self.gait_radius * 2)) * self.step_height
+        height = max(height, self.step_height / 2)
 
-    def _flip_groups(self):
-        swing_ref = self.swing_ref
-        swing_control = self.swing_control
-        swing_group = self.swing_group
-        self.swing_ref = self.stride_ref
-        self.swing_control = self.stride_control
-        self.swing_group = self.stride_group
-        self.stride_ref = swing_ref
-        self.stride_control = swing_control
-        self.stride_group = swing_group
+        self.swing_path = (
+            start,
+            Vec3d(start.x, start.y, start.z + height),
+            Vec3d(end.x, end.y, end.z + height),
+            end,
+        )
+        print(f"swing start {start}, end {end}, height: {height}")
+
+    def _end_swing(self):
+        self.leg_swinging = False
+        self.swing_phase = 0.0
+        if self.swing_group:
+            self.stride_groups.append(self.swing_group)
+        self.swing_group = None
+        self.swing_path = (Vec3d(), Vec3d(), Vec3d(), Vec3d())
+        self.swing_distance = 0.0
+
+    def _queue_rest_position(self, dt: float):
+        self.time_resting += dt
+        if self.time_resting <= self.rest_time:
+            return
+
+        # pick the stride group with the largest displacement
+        group = max(
+            self.stride_groups,
+            key=lambda g: g.origin.length(),
+            default=None,
+        )
+
+        if group and group.origin.length() > 0.0:
+            print(f"queueing rest")
+            self._queue_swing(group)
+        else:
+            self.time_resting = 0.0
+            self.state = GaitState.STANDING
 
 
 class MotionPlanner:
@@ -162,9 +198,9 @@ class MotionPlanner:
     def __init__(self, body: Body, leg_relative_stand_position: Vec3d):
         self.body = body
 
-        self.rotation = Vec3d()  # Body rotation rates (roll, pitch, yaw)
+        self.gait = TripodGait(Frame(origin=Vec3d(0, 0, -60)), Vec3d(220, 0, 0))
 
-        self.gait = TripodGait()
+        self.body_roll_offset = Vec3d()  # Body rotation rates (roll, pitch, yaw)
 
         # These will be configured by initialize()
         self.leg_relative_stand_position = leg_relative_stand_position
@@ -198,13 +234,13 @@ class MotionPlanner:
 
         self._start_transition(GaitState.STANDING)
 
-    def update_gait(self, gait_vector: Vec2d, rotation_velocity):
+    def update_gait(self, gait_vector: Vec2d, rotation_velocity: float):
         """Set desired body-relative normalized velocity vector."""
-        self.gait.update(gait_vector, rotation_velocity)
+        self.gait.update(Vec3d(gait_vector.x, gait_vector.y), rotation_velocity)
 
     def update_body_position(self, rotation: Vec3d):
         """Set desired body rotation rates (roll, pitch, yaw in deg/s)."""
-        self.rotation = rotation
+        self.body_roll_offset = rotation
 
     def step(self, dt: float):
         # TODO: Accumulate inactive motion time.
@@ -256,7 +292,7 @@ class MotionPlanner:
             for id in self.body.leg_ids:
                 start = self.transition_start_position[id]
                 target = self.target_foot_positions[id]
-                next_position = lerp_3d(start, target, t)
+                next_position = lerp_3d(t, start, target)
                 self.body.set_foot_position(id, next_position)
         else:
             self._clear_transition()

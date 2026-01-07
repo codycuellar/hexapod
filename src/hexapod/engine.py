@@ -62,6 +62,9 @@ class Vec2d(Vector):
     def to_3d(self):
         return Vec3d(self._data[0], self._data[1])
 
+    def copy(self) -> "Vec2d":
+        return Vec2d(*self._data)
+
 
 class Vec3d(Vector):
     def __init__(self, x: float = 0.0, y: float = 0.0, z: float = 0.0):
@@ -106,13 +109,16 @@ class Vec3d(Vector):
         l = self.length()
         if l == 0:
             return Vec3d(0, 0, 0)
-        return Vec3d(*(self * (1 / l)))
+        return Vec3d(*(self / l))
 
     def to_transform(self):
         return Transform.create(translation=self)
 
     def to_2d(self):
         return Vec2d(self.x, self.y)
+
+    def copy(self) -> "Vec3d":
+        return Vec3d(*self._data)
 
 
 class Rotation(Matrix):

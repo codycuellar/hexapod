@@ -4,40 +4,39 @@ from hexapod.matmath import Vector
 from hexapod.engine import Vec2d, Vec3d
 
 
-def lerp(v1: float, v2: float, t: float):
+def lerp(t: float, v1: float, v2: float) -> float:
     return v1 + (v2 - v1) * t
 
 
-def lerp_2d(p1: Vec2d, p2: Vec2d, t: float):
-    return Vec2d(lerp(p1.x, p2.x, t), lerp(p1.y, p2.y, t))
+def lerp_2d(t: float, p1: Vec2d, p2: Vec2d) -> Vec2d:
+    return Vec2d(lerp(t, p1.x, p2.x), lerp(t, p1.y, p2.y))
 
 
-def lerp_3d(p1: Vec3d, p2: Vec3d, t: float):
-    return Vec3d(lerp(p1.x, p2.x, t), lerp(p1.y, p2.y, t), lerp(p1.z, p2.z, t))
+def lerp_3d(t: float, p1: Vec3d, p2: Vec3d) -> Vec3d:
+    return Vec3d(lerp(t, p1.x, p2.x), lerp(t, p1.y, p2.y), lerp(t, p1.z, p2.z))
 
 
-def quad_bez(v1: float, v2: float, v3: float, t: float):
-    return lerp(lerp(v1, v2, t), lerp(v2, v3, t), t)
+def quad_bez(t: float, v1: float, v2: float, v3: float) -> float:
+    return lerp(t, lerp(t, v1, v2), lerp(t, v2, v3))
 
 
-def quad_bez_2d(p1: Vec2d, p2: Vec2d, p3: Vec2d, t: float):
+def quad_bez_2d(t: float, p1: Vec2d, p2: Vec2d, p3: Vec2d) -> Vec2d:
+    return Vec2d(quad_bez(t, p1.x, p2.x, p3.x), quad_bez(t, p1.y, p2.y, p3.y))
 
-    return Vector([quad_bez(p1.x, p2.x, p3.x, t), quad_bez(p1.y, p2.y, p3.y, t)])
 
-
-def quad_bez_3d(p1: Vec3d, p2: Vec3d, p3: Vec3d, t: float):
+def quad_bez_3d(t: float, p1: Vec3d, p2: Vec3d, p3: Vec3d) -> Vec3d:
     return Vec3d(
-        quad_bez(p1.x, p2.x, p3.x, t),
-        quad_bez(p1.y, p2.y, p3.y, t),
-        quad_bez(p1.z, p2.z, p3.z, t),
+        quad_bez(t, p1.x, p2.x, p3.x),
+        quad_bez(t, p1.y, p2.y, p3.y),
+        quad_bez(t, p1.z, p2.z, p3.z),
     )
 
 
 def cubic_bez(
-    v1: float, v2: float, v3: float, v4: float, t: float, style="decasteljau"
-):
+    t: float, v1: float, v2: float, v3: float, v4: float, style="decasteljau"
+) -> float:
     if style == "decasteljau":
-        return lerp(quad_bez(v1, v2, v3, t), quad_bez(v2, v3, v4, t), t)
+        return lerp(t, quad_bez(t, v1, v2, v3), quad_bez(t, v2, v3, v4))
     elif "bernstein":
         return (
             v1 * (-math.pow(t, 3) + (3 * math.pow(t, 2)) - (3 * t) + 1)
@@ -50,25 +49,23 @@ def cubic_bez(
 
 
 def cubic_bez_2d(
-    p1: Vector, p2: Vector, p3: Vector, p4: Vector, t: float, style="decasteljau"
-):
-    return Vector(
-        [
-            cubic_bez(p1[0], p2[0], p3[0], p4[0], t, style),
-            cubic_bez(p1[1], p2[1], p3[1], p4[1], t, style),
-        ]
+    t: float, p1: Vector, p2: Vector, p3: Vector, p4: Vector, style="decasteljau"
+) -> Vec2d:
+    return Vec2d(
+        cubic_bez(t, p1[0], p2[0], p3[0], p4[0], style),
+        cubic_bez(t, p1[1], p2[1], p3[1], p4[1], style),
     )
 
 
 def cubic_bez_3d(
-    p1: Vec3d, p2: Vec3d, p3: Vec3d, p4: Vec3d, t: float, style="decasteljau"
-):
+    t: float, p1: Vec3d, p2: Vec3d, p3: Vec3d, p4: Vec3d, style="decasteljau"
+) -> Vec3d:
     return Vec3d(
-        cubic_bez(p1.x, p2.x, p3.x, p4.x, t, style),
-        cubic_bez(p1.y, p2.y, p3.y, p4.y, t, style),
-        cubic_bez(p1.z, p2.z, p3.z, p4.z, t, style),
+        cubic_bez(t, p1.x, p2.x, p3.x, p4.x, style),
+        cubic_bez(t, p1.y, p2.y, p3.y, p4.y, style),
+        cubic_bez(t, p1.z, p2.z, p3.z, p4.z, style),
     )
 
 
-def cosine_ease_t(t: float):
+def cosine_ease_t(t: float) -> float:
     return (1 - math.cos(t * math.pi)) / 2
