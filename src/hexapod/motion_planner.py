@@ -13,7 +13,7 @@ from enum import Enum, auto
 from dataclasses import dataclass
 
 from hexapod.hexpod import Body, LegID
-from hexapod.engine import Vec3d, Vec2d, Frame, Rotation
+from hexapod.engine import Vec3d, Vec2d, Frame, Rotation, Transform
 from hexapod.interpolation import lerp_3d, cubic_bez_3d, lerp
 
 
@@ -61,11 +61,12 @@ class TripodGait:
         self.time_resting = 0.0
 
         self.gait_input_vector = Vec3d()  # normalized to unit-range
+        self.previous_gait_input_vector = Vec3d()
         self.gait_direction = Vec3d()
         self.gait_magnitude = 0.0
-        self.previous_gait_vector = Vec3d()
 
         self.rotation_input_velocity = 0.0  # unit-range factor
+        self.previous_rotation_input_velocity = 0.0  # unit-range factor
 
         self.swing_phase = 0.0
         self.swing_elapsed = 0.0
@@ -94,13 +95,11 @@ class TripodGait:
 
         self.print_group = self.stride_group_a
 
+        self.current_frame_transform = Transform.identity()
+
     @property
     def leg_swinging(self):
         return self.swing_group is not None
-
-    def print(self, group: Frame, msg: str):
-        if group is self.print_group:
-            print(msg)
 
     def get_foot_global_positions(self):
         return {
@@ -114,9 +113,10 @@ class TripodGait:
             # clamp to unit range just in case
             gait_vector /= l
 
-        self.previous_gait_vector = self.gait_input_vector
+        self.previous_gait_input_vector = self.gait_input_vector
         self.gait_input_vector = gait_vector
 
+        self.previous_rotation_input_velocity = self.rotation_input_velocity
         self.rotation_input_velocity = min(1.0, max(-1.0, rotation_velocity))
 
         if l > 0.0 or rotation_velocity != 0.0:
@@ -124,6 +124,7 @@ class TripodGait:
 
     def step(self, dt: float):
         self._filter_gait_vector(dt)
+        self._filter_rotation_velocity(dt)
 
         if self.state == GaitState.STANDING:
             if self.gait_magnitude > 0.0 or self.rotation_input_velocity != 0.0:
@@ -162,10 +163,6 @@ class TripodGait:
 
         angle = lerp(self.swing_phase, *self.swing_rotation_path)
         self.swing_group.parent.rotation = Rotation.degrees(z=angle)
-        self.print(
-            self.swing_group,
-            f"swinging angle current {angle:0.2f} - heights: {self.swing_group.origin.z:.3f}, {self.swing_group.parent.origin.z:.3f}",
-        )
 
         if self.swing_phase >= 1.0:
             self._end_swing()
@@ -280,8 +277,6 @@ class TripodGait:
 
             group.rotate(Rotation.degrees(z=delta))
 
-            self.print(stride_group, f"striding angle {final_angle:0.4f}")
-
             if abs(final_angle) > self.rotation_working_angle:
                 self._queue_swing(stride_group)
 
@@ -330,7 +325,7 @@ class TripodGait:
         rate of change.
         """
         next = self.gait_input_vector
-        current = self.previous_gait_vector
+        current = self.previous_gait_input_vector
 
         max_change = self.input_filter_rate * dt
 
@@ -339,10 +334,28 @@ class TripodGait:
 
         if delta_len > 0.0 and delta_len > max_change:
             delta = delta * (max_change / delta_len)
-            self.gait_input_vector = self.previous_gait_vector + delta
+            self.gait_input_vector = self.previous_gait_input_vector + delta
 
         self.gait_direction = self.gait_input_vector.normalize()
         self.gait_magnitude = self.gait_input_vector.length()
+
+    def _filter_rotation_velocity(self, dt: float):
+        """
+        Filters the raw rotation input so it cannot surpass a specified max
+        rate of change.
+        """
+        next_vel = self.rotation_input_velocity
+        current = self.previous_rotation_input_velocity
+
+        max_change = self.input_filter_rate * dt
+        delta = next_vel - current
+        delta_len = abs(delta)
+
+        if delta_len > 0.0 and delta_len > max_change:
+            # scale delta down to max_change while preserving direction
+            delta *= max_change / delta_len
+
+        self.rotation_input_velocity = current + delta
 
 
 class MotionPlanner:
