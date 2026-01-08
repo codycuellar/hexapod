@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 
 from controller.gamepad import GamePad
 from hexapod.hexpod import Body, Leg, LegID
-from hexapod.engine import Frame, Vec2d, Vec3d, Rotation
+from hexapod.engine import Frame, Vec3d, Rotation
 from hexapod.servos import MockServo
 from hexapod.motion_planner import MotionPlanner
 
