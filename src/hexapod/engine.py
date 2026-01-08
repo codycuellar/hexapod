@@ -246,9 +246,13 @@ class Transform(Matrix):
     def __matmul__(self, other: "Transform") -> "Transform": ...
     @overload
     def __matmul__(self, other: Vec3d) -> Vec3d: ...
+    @overload
+    def __matmul__(self, other: "Frame") -> "Transform": ...
     def __matmul__(self, other):
         if isinstance(other, Transform):
             return Transform(super().__matmul__(other)._data)
+        elif isinstance(other, Frame):
+            return self @ other._transform
         else:
             vec = super().__matmul__(Vector(other.to_list() + [1.0]))
             return Vec3d(*vec.to_list()[:3])

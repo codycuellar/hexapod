@@ -260,6 +260,9 @@ class TripodGait:
 
             group.origin = next_position
 
+            # apply the translation
+            self.current_frame_transform.translation = next_position - current_position
+
     def _perform_rotation(self, dt: float):
         for stride_group in self.stride_groups:
             group = stride_group.parent
@@ -275,10 +278,13 @@ class TripodGait:
                 final_angle = math.copysign(self.rotation_angle_max, final_angle)
                 delta = final_angle - current_angle
 
-            group.rotate(Rotation.degrees(z=delta))
+            delta_rotation = Rotation.degrees(z=delta)
+            group.rotate(delta_rotation)
 
             if abs(final_angle) > self.rotation_working_angle:
                 self._queue_swing(stride_group)
+
+            self.current_frame_transform.rotation = delta_rotation
 
     def _end_swing(self):
         if self.swing_group:
@@ -386,6 +392,7 @@ class MotionPlanner:
             GaitState.STANDING: 80,
             GaitState.WALKING: 80,
         }
+        self.ground_transform = Transform.identity()
 
     def initialize(self):
         """
@@ -416,6 +423,7 @@ class MotionPlanner:
         positions = self.gait.get_foot_global_positions()
         for id, pos in positions.items():
             self.body.set_foot_position(id, self.body.frame.world_pos_to_local(pos))
+        self.ground_transform = self.gait.current_frame_transform
 
     def _get_next_initial_pos(self, state: GaitState):
         if state == GaitState.STANDING:

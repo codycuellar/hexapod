@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 
 from controller.gamepad import GamePad
 from hexapod.hexpod import Body, Leg, LegID
-from hexapod.engine import Frame, Vec3d, Rotation
+from hexapod.engine import Frame, Vec3d, Rotation, Transform
 from hexapod.servos import MockServo
 from hexapod.motion_planner import MotionPlanner
 
@@ -74,6 +74,54 @@ def draw_hexapod(ax, body: Body, leg_lines, body_line):
     body_line.set_3d_properties(zs)
 
 
+GRID_SPACING = 50.0
+GRID_COUNT = 50  # how many lines in each direction
+
+
+def create_ground_grid(ax):
+    """Pre-create grid lines and return them"""
+    lines = []
+
+    half_count = GRID_COUNT // 2
+    for i in range(-half_count, half_count + 1):
+        # X lines along Y axis
+        (line,) = ax.plot([], [], [], color="gray", lw=0.5)
+        lines.append(("x", i, line))
+        # Y lines along X axis
+        (line,) = ax.plot([], [], [], color="gray", lw=0.5)
+        lines.append(("y", i, line))
+    return lines
+
+
+GROUND_ORIGIN = Vec3d(0, 0, -60)
+
+
+def update_ground_grid_accumulated(lines: list, ground_frame: Transform):
+    """
+    Update ground grid based on accumulated ground_frame.
+    - Ground starts at Z = -60
+    - Rotates with ground_frame.rotation
+    - Translates with ground_frame.origin
+    """
+    half_count = GRID_COUNT // 2
+    z0 = 0.0  # local plane Z (we embed -60 in ground_frame.origin)
+
+    for axis, i, line in lines:
+        if axis == "x":
+            start_local = Vec3d(i * GRID_SPACING, -half_count * GRID_SPACING, z0)
+            end_local = Vec3d(i * GRID_SPACING, half_count * GRID_SPACING, z0)
+        else:  # "y"
+            start_local = Vec3d(-half_count * GRID_SPACING, i * GRID_SPACING, z0)
+            end_local = Vec3d(half_count * GRID_SPACING, i * GRID_SPACING, z0)
+
+        # Apply rotation then translation
+        start_world = ground_frame.rotation @ start_local + ground_frame.translation
+        end_world = ground_frame.rotation @ end_local + ground_frame.translation
+
+        line.set_data([start_world.x, end_world.x], [start_world.y, end_world.y])
+        line.set_3d_properties([start_world.z, end_world.z])
+
+
 def main():
     print("Creating hexapod...")
     hexapod = create_simulation_hexapod()
@@ -104,6 +152,10 @@ def main():
         (line,) = ax.plot([], [], [], "o-", lw=2)
         leg_lines[leg_id] = line
     (body_line,) = ax.plot([], [], [], "k-", lw=2)  # black line
+
+    grid_lines = create_ground_grid(ax)
+    ground_frame = Frame(origin=GROUND_ORIGIN, rotation=Rotation.identity())
+
     DT = 1 / 20  # simulating can't go much faster
 
     next_time = time.perf_counter()
@@ -114,7 +166,12 @@ def main():
         motion_planner.update_gait(gamepad.joy_l, gamepad.trigger_l - gamepad.trigger_r)
         motion_planner.step(DT)
 
+        ground_frame = motion_planner.ground_transform @ ground_frame
+
+        # draw ground grid using the accumulated frame
+        update_ground_grid_accumulated(grid_lines, ground_frame)
         draw_hexapod(ax, hexapod, leg_lines, body_line)
+
         fig.canvas.draw()
         plt.pause(0.001)  # <-- GUI event pump only
 
