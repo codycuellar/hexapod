@@ -357,6 +357,9 @@ class Frame:
     def remove_child(self, child: "Frame"):
         self._children.remove(child)
 
+    def has_child(self, child: "Frame"):
+        return child in self._children
+
     def move(self, delta: Vec3d) -> "Frame":
         """
         Translate the frame by a delta. This moves the origin and affects all
@@ -369,7 +372,7 @@ class Frame:
 
     def rotate(self, rotation: Rotation) -> "Frame":
         """
-        Rotate the rame about its own origin. This affects children node's
+        Rotate the frame about its own origin. This affects children node's
         positions, and origin remains the same.
         :param delta: The vector to move the frame origin by.
         """

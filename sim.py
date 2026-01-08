@@ -111,7 +111,7 @@ def main():
     running = True
 
     while running:
-        motion_planner.update_gait(gamepad.joy_l, gamepad.trigger_r - gamepad.trigger_l)
+        motion_planner.update_gait(gamepad.joy_l, gamepad.trigger_l - gamepad.trigger_r)
         motion_planner.step(DT)
 
         draw_hexapod(ax, hexapod, leg_lines, body_line)
