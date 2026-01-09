@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 
 from controller.gamepad import GamePad
 from hexapod.hexpod import Body, Leg, LegID
-from hexapod.engine import Frame, Vec3d, Rotation, Transform
+from hexapod.engine import Frame, Vec3d, Vec2d, Rotation, Transform
 from hexapod.servos import MockServo
 from hexapod.motion_planner import MotionPlanner
 
@@ -140,7 +140,7 @@ def main():
 
     ax.set_xlim(-200, 200)
     ax.set_ylim(-200, 200)
-    ax.set_zlim(0, 200)
+    ax.set_zlim(-200, 200)
 
     ax.set_axis_off()
 
@@ -162,7 +162,49 @@ def main():
     running = True
 
     while running:
-        motion_planner.update_gait(gamepad.joy_l, gamepad.trigger_l - gamepad.trigger_r)
+        gait_vec = Vec2d()
+        gait_turn = 0.0
+
+        body_translation_cmd = Vec3d()
+        body_rotation_cmd = Vec3d()  # pitch, roll, yaw
+
+        # LEFT STICK
+        if gamepad.bumper_l:
+            body_translation_cmd = gamepad.joy_l.to_3d()
+        else:
+            gait_vec = gamepad.joy_l
+
+        # right stick
+        if gamepad.bumper_l:
+            body_translation_cmd = Vec3d(
+                body_translation_cmd.x, body_translation_cmd.y, gamepad.joy_r.y
+            )
+        else:
+            body_rotation_cmd = Vec3d(
+                -gamepad.joy_r.y, gamepad.joy_r.x, body_rotation_cmd.z
+            )
+
+        # TRIGGERS
+        trigger_turn = gamepad.trigger_l - gamepad.trigger_r
+        if gamepad.bumper_r:
+            body_rotation_cmd = Vec3d(
+                body_rotation_cmd.x, body_rotation_cmd.y, trigger_turn
+            )
+        else:
+            gait_turn = trigger_turn
+
+        motion_planner.update_gait(
+            DT,
+            gait_vec,
+            gait_turn,
+        )
+
+        motion_planner.offset_body(
+            DT,
+            body_translation_cmd,
+            body_rotation_cmd,
+        )
+
         motion_planner.step(DT)
 
         ground_frame = motion_planner.ground_transform @ ground_frame

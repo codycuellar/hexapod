@@ -98,6 +98,16 @@ class Vec3d(Vector):
     def z(self):
         return self[2]
 
+    def elementwise(self, op: str, other: "Vec3d"):
+        if op == "mul":
+            return Vec3d(self.x * other.x, self.y * other.y, self.z * other.z)
+        elif op == "div":
+            return Vec3d(self.x / other.x, self.y / other.y, self.z / other.z)
+        elif op == "add":
+            return Vec3d(self.x + other.x, self.y + other.y, self.z + other.z)
+        else:
+            return Vec3d(self.x - other.x, self.y - other.y, self.z - other.z)
+
     def cross(self, other: "Vec3d"):
         return Vec3d(
             self[1] * other[2] - self[2] * other[1],
@@ -174,6 +184,10 @@ class Rotation(Matrix):
                 ],
             ]
         )
+
+    @staticmethod
+    def degrees_vec(vector: Vec3d):
+        return Rotation.degrees(vector.x, vector.y, vector.z)
 
     def __init__(self, data: list[list[float]]):
         if not (len(data) == 3 and len(data[0]) == 3):

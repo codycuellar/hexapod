@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from hexapod.hexpod import Body, LegID
 from hexapod.engine import Vec3d, Vec2d, Frame, Rotation, Transform
-from hexapod.interpolation import lerp_3d, cubic_bez_3d, lerp
+import hexapod.interpolation as lerp
 
 
 class GaitState(Enum):
@@ -24,37 +24,40 @@ class GaitState(Enum):
 
 
 @dataclass
-class RotationParameters:
-    velocity = 0.0  # unit scale
-    safe_angle = 10  # degrees
-    max_angle = 15  # degrees
-    speed = 20  # degrees/second
+class GaitParameters:
+    working_radius = 35.0  # mm
+    working_radius_max = 80.0
+    max_velocity = 225.0  # mm/s
+    swing_velocity_scale = 1.5  # factor of max_velocity
+    min_swing_velocity_factor = 0.3
+    step_height = 25.0  # mm
 
 
 @dataclass
-class StrideParameters:
-    vector = Vec3d()
+class RotationParameters:
+    safe_angle = 12  # degrees
+    max_angle = 18  # degrees
+    max_velocity = 45  # degrees / second
 
 
 class TripodGait:
-    gait_working_radius = 30.0  # mm
+    gait_working_radius = 45.0  # mm
     gait_radius_max = 65.0
-    gait_velocity_max = 200.0  # mm/s
-    gait_speed_scale_min = 0.2  # seconds
-    gait_swing_velocity_max = 325.0  # mm/s
+    gait_velocity_max = 225.0  # mm/s
+    gait_swing_speed_scale_min = 0.2  # seconds
+    gait_swing_velocity_max = 300.0  # mm/s
 
     swing_duration_resting = 0.35  # seconds
-    swing_duration_min = 0.35  # seconds
+    swing_duration_min = 0.10  # seconds
     swing_radius_scale_max = 0.9  # unit vector scale
 
     rotation_working_angle = 12  # +/- degrees
     rotation_angle_max = 20  # +/- degrees
-    rotation_velocity_max = 30  # deg/second
-    rotation_swing_velocity_max = 45  # deg/second
+    rotation_velocity_max = 35  # deg/second
+    rotation_swing_velocity_max = 55  # deg/second
     rotation_angle_scale_min = 0.5
 
     step_height = 25.0  # mm
-    input_filter_rate = 1.75  # change/seconds
     rest_trigger_time = 0.75  # seconds
 
     def __init__(self, reference_frame: Frame, leg_offset: Vec3d):
@@ -62,18 +65,17 @@ class TripodGait:
         self.time_resting = 0.0
 
         self.gait_input_vector = Vec3d()  # normalized to unit-range
-        self.previous_gait_input_vector = Vec3d()
         self.gait_direction = Vec3d()
         self.gait_magnitude = 0.0
 
         self.rotation_input_velocity = 0.0  # unit-range factor
-        self.previous_rotation_input_velocity = 0.0  # unit-range factor
 
         self.swing_phase = 0.0
         self.swing_elapsed = 0.0
         self.swing_duration = 0.0
         self.swing_path = (Vec3d(), Vec3d(), Vec3d(), Vec3d())
         self.swing_rotation_path = (0.0, 0.0)
+        self.rotation_offset = Vec3d()
 
         self.reference_frame = reference_frame
         self.rotate_group_a = Frame(parent=reference_frame)
@@ -109,24 +111,16 @@ class TripodGait:
         }
 
     def update(self, gait_vector: Vec3d, rotation_velocity: float):
-        l = gait_vector.length()
-        if l > 1.0:
-            # clamp to unit range just in case
-            gait_vector /= l
-
-        self.previous_gait_input_vector = self.gait_input_vector
         self.gait_input_vector = gait_vector
+        self.gait_direction = self.gait_input_vector.normalize()
+        self.gait_magnitude = self.gait_input_vector.length()
 
-        self.previous_rotation_input_velocity = self.rotation_input_velocity
-        self.rotation_input_velocity = min(1.0, max(-1.0, rotation_velocity))
+        self.rotation_input_velocity = rotation_velocity
 
-        if l > 0.0 or rotation_velocity != 0.0:
+        if self.gait_magnitude > 0.0 or rotation_velocity != 0.0:
             self.time_resting = 0.0
 
     def step(self, dt: float):
-        self._filter_gait_vector(dt)
-        self._filter_rotation_velocity(dt)
-
         if self.state == GaitState.STANDING:
             if self.gait_magnitude > 0.0 or self.rotation_input_velocity != 0.0:
                 self.state = GaitState.WALKING
@@ -153,7 +147,6 @@ class TripodGait:
                 and self.rotation_input_velocity == 0.0
             ):
                 self._queue_rest_position(dt)
-                return
 
     def _perform_swing(self, dt: float):
         if not self.swing_group:
@@ -163,11 +156,11 @@ class TripodGait:
 
         self.swing_elapsed += dt
         self.swing_phase = min(1.0, self.swing_elapsed / self.swing_duration)
-        pos = cubic_bez_3d(self.swing_phase, *self.swing_path)
+        pos = lerp.cubic_bez_3d(self.swing_phase, *self.swing_path)
 
         self.swing_group.origin = pos
 
-        angle = lerp(self.swing_phase, *self.swing_rotation_path)
+        angle = lerp.lerp(self.swing_phase, *self.swing_rotation_path)
         self.swing_group.parent.rotation = Rotation.degrees(z=angle)
 
         if self.swing_phase >= 1.0:
@@ -212,9 +205,9 @@ class TripodGait:
         if is_rest:
             self.swing_duration = self.swing_duration_resting
         else:
-            speed_scale = max(self.gait_magnitude, self.gait_speed_scale_min)
+            speed_scale = max(self.gait_magnitude, self.gait_swing_speed_scale_min)
             effective_swing_velocity = self.gait_swing_velocity_max * speed_scale
-            stride_duration = max(
+            swing_duration = max(
                 distance / effective_swing_velocity, self.swing_duration_min
             )
 
@@ -237,7 +230,7 @@ class TripodGait:
                     abs(swing_rotation_end) / effective_rotation_velocity
                 )
 
-            self.swing_duration = max(stride_duration, rotation_duration)
+            self.swing_duration = max(swing_duration, rotation_duration)
 
     def _perform_stride(self, dt: float, gait_magnitude: float):
         for group in self.stride_groups:
@@ -333,44 +326,6 @@ class TripodGait:
             .degree_x()
         )
 
-    def _filter_gait_vector(self, dt: float):
-        """
-        Filters the raw input vector so it cannot surpass a specified max
-        rate of change.
-        """
-        next = self.gait_input_vector
-        current = self.previous_gait_input_vector
-
-        max_change = self.input_filter_rate * dt
-
-        delta = next - current
-        delta_len = delta.length()
-
-        if delta_len > 0.0 and delta_len > max_change:
-            delta = delta * (max_change / delta_len)
-            self.gait_input_vector = self.previous_gait_input_vector + delta
-
-        self.gait_direction = self.gait_input_vector.normalize()
-        self.gait_magnitude = self.gait_input_vector.length()
-
-    def _filter_rotation_velocity(self, dt: float):
-        """
-        Filters the raw rotation input so it cannot surpass a specified max
-        rate of change.
-        """
-        next_vel = self.rotation_input_velocity
-        current = self.previous_rotation_input_velocity
-
-        max_change = self.input_filter_rate * dt
-        delta = next_vel - current
-        delta_len = abs(delta)
-
-        if delta_len > 0.0 and delta_len > max_change:
-            # scale delta down to max_change while preserving direction
-            delta *= max_change / delta_len
-
-        self.rotation_input_velocity = current + delta
-
 
 class MotionPlanner:
     """
@@ -378,12 +333,29 @@ class MotionPlanner:
     Handles gait patterns and converts velocity/rotation commands into foot positions.
     """
 
+    max_pos_offset = Vec3d(40, 40, 50)  # mm
+    max_rot_offset = Vec3d(20, 20, 40)  # degrees
+    pos_offset_roc = 18  # mm/s
+    rot_offset_roc = 18  # deg/s
+
+    reference_frame_pos = Vec3d(0, 0, 0)
+    foot_offset = Vec3d(225, 0, 0)
+
+    input_filter_rate = 6.0  # change/seconds
+
     def __init__(self, body: Body, leg_relative_stand_position: Vec3d):
         self.body = body
 
-        self.gait = TripodGait(Frame(origin=Vec3d(0, 0, -60)), Vec3d(220, 0, 0))
+        self.gait = TripodGait(Frame(origin=self.reference_frame_pos), self.foot_offset)
 
-        self.body_roll_offset = Vec3d()  # Body rotation rates (roll, pitch, yaw)
+        self.body_pos_offset_fixed = Vec3d(0, 0, 65)  # fixed body position offset in mm
+        self.body_rot_offset_fixed = Vec3d()  # fixed body rotation offset in degrees
+        self.body_pos_input_offset = (
+            Vec3d()
+        )  # current step body position offset as unit vector
+        self.body_rot_input_offset = (
+            Vec3d()
+        )  # current step body rotation offset as unit vector
 
         # These will be configured by initialize()
         self.leg_relative_stand_position = leg_relative_stand_position
@@ -418,19 +390,60 @@ class MotionPlanner:
 
         self._start_transition(GaitState.STANDING)
 
-    def update_gait(self, gait_vector: Vec2d, rotation_velocity: float):
+    def update_gait(self, dt: float, gait_vector: Vec2d, rotation_velocity: float):
         """Set desired body-relative normalized velocity vector."""
-        self.gait.update(Vec3d(gait_vector.x, gait_vector.y), rotation_velocity)
+        # clamp to unit length if it has exceeded for some reason.
+        l = gait_vector.length()
+        if l > 1.0:
+            gait_vector = gait_vector.normalize()
 
-    def update_body_position(self, rotation: Vec3d):
+        # clamp the rotationaly velocity if needed
+        if rotation_velocity < -1.0:
+            rotation_velocity = max(-1.0, rotation_velocity)
+        if rotation_velocity > 1.0:
+            rotation_velocity = min(1.0, rotation_velocity)
+
+        # filter the input rate of change
+        vector = lerp.rate_limit_2d(
+            dt, self.gait.gait_input_vector.to_2d(), gait_vector, self.input_filter_rate
+        )
+        rotation_velocity = lerp.rate_limit(
+            dt,
+            self.gait.rotation_input_velocity,
+            rotation_velocity,
+            self.input_filter_rate,
+        )
+
+        self.gait.update(vector.to_3d(), rotation_velocity)
+
+    def offset_body(self, dt: float, offset: Vec3d, rotation: Vec3d):
         """Set desired body rotation rates (roll, pitch, yaw in deg/s)."""
-        self.body_roll_offset = rotation
+        self.body_pos_input_offset = lerp.rate_limit_3d(
+            dt, self.body_pos_input_offset, offset, self.input_filter_rate
+        )
+        self.body_rot_input_offset = lerp.rate_limit_3d(
+            dt, self.body_rot_input_offset, rotation, self.input_filter_rate
+        )
+
+    def trim_body(self, offset: Vec3d, rotation: Vec3d):
+        self.body_pos_offset_fixed += offset * self.pos_offset_roc
+        self.body_rot_offset_fixed += rotation * self.rot_offset_roc
 
     def step(self, dt: float):
         self.gait.step(dt)
         positions = self.gait.get_foot_global_positions()
+
+        self.body.frame.origin = self.body_pos_offset_fixed + (
+            self.body_pos_input_offset.elementwise("mul", self.max_pos_offset)
+        )
+        self.body.frame.rotation = Rotation.degrees_vec(
+            self.body_rot_offset_fixed
+            + self.body_rot_input_offset.elementwise("mul", self.max_rot_offset)
+        )
+
         for id, pos in positions.items():
             self.body.set_foot_position(id, self.body.frame.world_pos_to_local(pos))
+
         self.ground_transform = self.gait.current_frame_transform
 
     def _get_next_initial_pos(self, state: GaitState):
@@ -457,20 +470,3 @@ class MotionPlanner:
             max_distance = max(max_distance, start.distance_to(targets[id]))
 
         self.transition_target_time = max_distance / self.min_transition_velocity[state]
-
-    def _do_transition(self, dt: float):
-        self.time_in_transition += dt
-        t = self.time_in_transition / self.transition_target_time
-        if t <= 1.0:
-            for id in self.body.leg_ids:
-                start = self.transition_start_position[id]
-                target = self.target_foot_positions[id]
-                next_position = lerp_3d(t, start, target)
-                self.body.set_foot_position(id, next_position)
-        else:
-            self._clear_transition()
-
-    def _clear_transition(self):
-        self.transitioning = False
-        self.time_in_transition = 0.0
-        self.transition_start_position = {}

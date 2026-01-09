@@ -150,10 +150,16 @@ class Leg:
                 # Calculate what the max reachable distance is from coxa
                 # TODO: This doesn't factor in the rigid Z axis of the coxa.
                 direction = position.normalize()
-                position = direction * (cox_len + max_reach)
+                new_position = direction * (cox_len + max_reach)
                 # Recalculate after scaling
-                xy_len = max(0, Vec2d(position.x, position.y).length() - cox_len)
-                zH = Vec2d(position.z, xy_len).length()
+                xy_len = max(
+                    0, Vec2d(new_position.x, new_position.y).length() - cox_len
+                )
+                zH = Vec2d(new_position.z, xy_len).length()
+                print(
+                    f"Leg {self.id} maximum reach attempted! Clamping {position} to {new_position}"
+                )
+                position = new_position
 
         a2cos = (fem_len**2 + zH**2 - tib_len**2) / (2 * fem_len * zH)
         a2 = math.acos(max(-1.0, min(1.0, a2cos)))

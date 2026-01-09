@@ -88,3 +88,35 @@ def cubic_bez_3d(
 
 def cosine_ease_t(t: float) -> float:
     return (1 - math.cos(t * math.pi)) / 2
+
+
+def rate_limit(t: float, current: float, target: float, max_rate: float) -> float:
+    delta = target - current
+    max_delta = max_rate * t
+
+    if abs(delta) > max_delta:
+        delta = math.copysign(max_delta, delta)
+
+    return current + delta
+
+
+def rate_limit_vec(
+    t: float, current: Vector, target: Vector, max_rate: float
+) -> Vector:
+    delta = target - current
+    delta_len = delta.length()
+
+    max_delta = max_rate * t
+
+    if delta_len > max_delta and delta_len > 0.0:
+        delta = delta * (max_delta / delta_len)
+
+    return current + delta
+
+
+def rate_limit_2d(t: float, current: Vec2d, target: Vec2d, max_rate: float) -> Vec2d:
+    return Vec2d(*rate_limit_vec(t, current, target, max_rate))
+
+
+def rate_limit_3d(t: float, current: Vec3d, target: Vec3d, max_rate: float) -> Vec3d:
+    return Vec3d(*rate_limit_vec(t, current, target, max_rate))
