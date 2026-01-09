@@ -118,6 +118,7 @@ def update_ground_grid_accumulated(lines: list, ground_frame: Transform):
         start_world = ground_frame.rotation @ start_local + ground_frame.translation
         end_world = ground_frame.rotation @ end_local + ground_frame.translation
 
+        line.set_clip_on(False)
         line.set_data([start_world.x, end_world.x], [start_world.y, end_world.y])
         line.set_3d_properties([start_world.z, end_world.z])
 
@@ -141,9 +142,7 @@ def main():
     ax.set_ylim(-200, 200)
     ax.set_zlim(0, 200)
 
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
-    ax.set_zlabel("Z")
+    ax.set_axis_off()
 
     plt.show(block=False)
 

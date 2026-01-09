@@ -37,23 +37,24 @@ class StrideParameters:
 
 
 class TripodGait:
-    gait_working_radius = 35.0  # mm
-    gait_radius_max = 60.0
-    gait_velocity_max = 175.0  # mm/s
+    gait_working_radius = 30.0  # mm
+    gait_radius_max = 65.0
+    gait_velocity_max = 200.0  # mm/s
     gait_speed_scale_min = 0.2  # seconds
-    gait_swing_velocity_max = 250.0  # mm/s
+    gait_swing_velocity_max = 325.0  # mm/s
 
     swing_duration_resting = 0.35  # seconds
     swing_duration_min = 0.35  # seconds
     swing_radius_scale_max = 0.9  # unit vector scale
 
-    rotation_working_angle = 10  # +/- degrees
-    rotation_angle_max = 15  # +/- degrees
-    rotation_velocity_max = 20  # deg/second
+    rotation_working_angle = 12  # +/- degrees
+    rotation_angle_max = 20  # +/- degrees
+    rotation_velocity_max = 30  # deg/second
+    rotation_swing_velocity_max = 45  # deg/second
     rotation_angle_scale_min = 0.5
 
     step_height = 25.0  # mm
-    input_filter_rate = 2.0  # change/seconds
+    input_filter_rate = 1.75  # change/seconds
     rest_trigger_time = 0.75  # seconds
 
     def __init__(self, reference_frame: Frame, leg_offset: Vec3d):
@@ -138,8 +139,13 @@ class TripodGait:
 
             if self.gait_magnitude > 0.0:
                 self._perform_stride(dt, self.gait_magnitude)
+            else:
+                self.current_frame_transform.translation = Vec3d()
+
             if self.rotation_input_velocity != 0.0:
                 self._perform_rotation(dt)
+            else:
+                self.current_frame_transform.rotation = Rotation.identity()
 
             if (
                 not self.leg_swinging
@@ -224,7 +230,9 @@ class TripodGait:
                 swing_rotation_end = velocity_clamped * self.rotation_working_angle
                 self.swing_rotation_path = (current_rotation_angle, swing_rotation_end)
                 speed_scale = max(0.2, abs(self.rotation_input_velocity))
-                effective_rotation_velocity = self.rotation_velocity_max * speed_scale
+                effective_rotation_velocity = (
+                    self.rotation_swing_velocity_max * speed_scale
+                )
                 rotation_duration = (
                     abs(swing_rotation_end) / effective_rotation_velocity
                 )
@@ -255,7 +263,7 @@ class TripodGait:
                 t = min(max(t, 0.0), 1.0)
 
                 # smoothstep easing
-                ease = 1.0 - (3 * t * t - 2 * t * t * t)
+                ease = (1 - t) ** 2
                 next_position = current_position + step_vector * ease
 
             group.origin = next_position
