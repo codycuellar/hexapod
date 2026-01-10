@@ -24,50 +24,49 @@ class GaitState(Enum):
 
 
 @dataclass
-class GaitParameters:
-    working_radius = 35.0  # mm
-    working_radius_max = 80.0
-    max_velocity = 225.0  # mm/s
-    swing_velocity_scale = 1.5  # factor of max_velocity
-    min_swing_velocity_factor = 0.3
+class GaitGeometry:
     step_height = 25.0  # mm
+    safe_radius = 45.0  # mm
+    max_radius = 65.0  # mm
+    safe_angle = 12  # degrees
+    max_angle = 18  # degrees
 
 
 @dataclass
-class RotationParameters:
-    safe_angle = 12  # degrees
-    max_angle = 18  # degrees
-    max_velocity = 45  # degrees / second
+class GaitMotion:
+    max_velocity = 225.0  # mm/s
+    max_rot_velocity = 35  # degrees / second
+    swing_velocity_scale = 1.5  # factor of max velocity
+    min_swing_velocity_factor = 0.3  # factor of max velocity
+
+
+@dataclass
+class GaitTiming:
+    swing_duration_resting = 0.35  # seconds
+    min_swing_time = 0.2  # seconds
+    min_swing_duration = 0.10  # seconds
+    rest_trigger_time = 0.75  # seconds
 
 
 class TripodGait:
-    gait_working_radius = 45.0  # mm
-    gait_radius_max = 65.0
-    gait_velocity_max = 225.0  # mm/s
-    gait_swing_speed_scale_min = 0.2  # seconds
-    gait_swing_velocity_max = 300.0  # mm/s
+    def __init__(
+        self,
+        reference_frame: Frame,
+        leg_offset: Vec3d,
+        geometry: GaitGeometry,
+        motion: GaitMotion,
+        timing: GaitTiming,
+    ):
+        self.reference_frame = reference_frame
+        self.geometry = geometry
+        self.motion = motion
+        self.timing = timing
 
-    swing_duration_resting = 0.35  # seconds
-    swing_duration_min = 0.10  # seconds
-    swing_radius_scale_max = 0.9  # unit vector scale
-
-    rotation_working_angle = 12  # +/- degrees
-    rotation_angle_max = 20  # +/- degrees
-    rotation_velocity_max = 35  # deg/second
-    rotation_swing_velocity_max = 55  # deg/second
-    rotation_angle_scale_min = 0.5
-
-    step_height = 25.0  # mm
-    rest_trigger_time = 0.75  # seconds
-
-    def __init__(self, reference_frame: Frame, leg_offset: Vec3d):
         self.state = GaitState.STANDING
+
         self.time_resting = 0.0
 
-        self.gait_input_vector = Vec3d()  # normalized to unit-range
-        self.gait_direction = Vec3d()
-        self.gait_magnitude = 0.0
-
+        self.input_vector = Vec3d()  # normalized to unit-range
         self.rotation_input_velocity = 0.0  # unit-range factor
 
         self.swing_phase = 0.0
@@ -77,7 +76,6 @@ class TripodGait:
         self.swing_rotation_path = (0.0, 0.0)
         self.rotation_offset = Vec3d()
 
-        self.reference_frame = reference_frame
         self.rotate_group_a = Frame(parent=reference_frame)
         self.stride_group_a = Frame(parent=self.rotate_group_a)
         self.rotate_group_b = Frame(parent=reference_frame)
@@ -98,7 +96,9 @@ class TripodGait:
 
         self.print_group = self.stride_group_a
 
-        self.current_frame_transform = Transform.identity()
+        # this is just a simulation helper to provide the ground transformation
+        # synced with the stride movment.
+        self.ground_transform = Transform.identity()
 
     @property
     def leg_swinging(self):
@@ -111,18 +111,17 @@ class TripodGait:
         }
 
     def update(self, gait_vector: Vec3d, rotation_velocity: float):
-        self.gait_input_vector = gait_vector
-        self.gait_direction = self.gait_input_vector.normalize()
-        self.gait_magnitude = self.gait_input_vector.length()
-
+        self.input_vector = gait_vector
         self.rotation_input_velocity = rotation_velocity
 
-        if self.gait_magnitude > 0.0 or rotation_velocity != 0.0:
+        if gait_vector.length() > 0.0 or rotation_velocity != 0.0:
             self.time_resting = 0.0
 
     def step(self, dt: float):
+        mag = self.input_vector.length()
+
         if self.state == GaitState.STANDING:
-            if self.gait_magnitude > 0.0 or self.rotation_input_velocity != 0.0:
+            if mag > 0.0 or self.rotation_input_velocity != 0.0:
                 self.state = GaitState.WALKING
                 self._queue_swing(self.stride_groups[0])
 
@@ -131,22 +130,75 @@ class TripodGait:
             if self.leg_swinging:
                 self._perform_swing(dt)
 
-            if self.gait_magnitude > 0.0:
-                self._perform_stride(dt, self.gait_magnitude)
+            if mag > 0.0:
+                self._perform_stride(dt)
             else:
-                self.current_frame_transform.translation = Vec3d()
+                self.ground_transform.translation = Vec3d()
 
             if self.rotation_input_velocity != 0.0:
                 self._perform_rotation(dt)
             else:
-                self.current_frame_transform.rotation = Rotation.identity()
+                self.ground_transform.rotation = Rotation.identity()
 
             if (
                 not self.leg_swinging
-                and self.gait_magnitude == 0.0
+                and mag == 0.0
                 and self.rotation_input_velocity == 0.0
             ):
                 self._queue_rest_position(dt)
+
+    def _perform_stride(self, dt: float):
+        gait_dir = self.input_vector.normalize()
+        gait_mag = self.input_vector.length()
+
+        # the maximum distance the foot can travel in world space this timestep
+        max_step_distance = self.motion.max_velocity * gait_mag * dt
+
+        transform_applied = False
+        for group in self.stride_groups:
+            current_position = group.origin
+            step_vector = -gait_dir * max_step_distance
+            next_position = current_position + step_vector
+            step_radius = next_position.length()
+
+            # if we've left the safe zone, attempt to trigger a swing, and start
+            # an eased ramp into the outer clipping zone.
+            if step_radius > self.geometry.safe_radius:
+                self._queue_swing(group)
+                next_position = current_position + self._smooth_clamp_stride_limit(
+                    step_radius, step_vector
+                )
+
+            group.origin = next_position
+
+            # Apply the translation. Only do it once since it's the same for all
+            # feet currently on the ground.
+            if not transform_applied:
+                self.ground_transform.translation = next_position - current_position
+                transform_applied = True
+
+    def _perform_rotation(self, dt: float):
+        for stride_group in self.stride_groups:
+            rot_group = stride_group.parent
+            if not rot_group:
+                return
+
+            current_angle = self._get_rotation_group_angle(rot_group)
+            delta = -self.rotation_input_velocity * self.motion.max_rot_velocity * dt
+            final_angle = current_angle + delta
+
+            # clamp to outer limit
+            if abs(final_angle) > self.geometry.max_angle:
+                final_angle = math.copysign(self.geometry.max_angle, final_angle)
+                delta = final_angle - current_angle
+
+            delta_rotation = Rotation.degrees(z=delta)
+            rot_group.rotate(delta_rotation)
+
+            if abs(final_angle) > self.geometry.safe_angle:
+                self._queue_swing(stride_group)
+
+            self.ground_transform.rotation = delta_rotation
 
     def _perform_swing(self, dt: float):
         if not self.swing_group:
@@ -180,112 +232,72 @@ class TripodGait:
         self.swing_elapsed = 0.0
 
         start = group.origin
+        # TODO: A more smooth approach would be to sample two halves of the curve,
+        # with control points like the following so the initial swing continues
+        # the motion path of the stride momentarily. Then the inverse for the
+        # second half of the phase to guide a smoth transition into stride.
+        # [(0 ,0) (-0.5, 0), (1, 0), (0.5, 1)]
         if not end:
             end = (
-                self.gait_direction
-                * self.gait_working_radius
-                * self.swing_radius_scale_max
+                self.input_vector.normalize()
+                * self.geometry.safe_radius
+                * 0.95  # small shirinkage so we don't plant ON the safe zone edge
             )
-
-        # TODO: sample all feet in this group with rotation applied to get the max step
-        # distance of any foot for more accurate timing estimation
-        distance = start.distance_to(end)
 
         self.swing_path = (
             start,
-            Vec3d(start.x, start.y, start.z + self.step_height),
-            Vec3d(end.x, end.y, end.z + self.step_height),
+            Vec3d(start.x, start.y, start.z + self.geometry.step_height),
+            Vec3d(end.x, end.y, end.z + self.geometry.step_height),
             end,
         )
 
-        # always look to recenter first
-        current_rotation_angle = self._get_group_angle(group.parent)
-        self.swing_rotation_path = (current_rotation_angle, 0.0)
+        # TODO: maybe better appraoch is to sample the current angle velocity
+        # and use that to determine where to put the end ancle
+        current_angle = self._get_rotation_group_angle(group.parent)
+        # always try to recenter the angle
+        self.swing_rotation_path = (current_angle, 0.0)
 
         if is_rest:
-            self.swing_duration = self.swing_duration_resting
+            self.swing_duration = self.timing.swing_duration_resting
         else:
-            speed_scale = max(self.gait_magnitude, self.gait_swing_speed_scale_min)
-            effective_swing_velocity = self.gait_swing_velocity_max * speed_scale
+            # TODO: This whole section is messy. We should start with VELOCITY
+            # probably rather than duration directly. That way during a swing,
+            # we can dynamically adjust the landing spot and swing velocities.
+            # This current approach suffers from slow initial velocity, but stride
+            # ramping up, ends up hitting stride limits waiting for the slow swing.
+            speed_factor = max(
+                self.input_vector.length(), self.motion.min_swing_velocity_factor
+            )
+            swing_velocity = (
+                self.motion.max_velocity
+                * self.motion.swing_velocity_scale
+                * speed_factor
+            )
             swing_duration = max(
-                distance / effective_swing_velocity, self.swing_duration_min
+                start.distance_to(end) / swing_velocity, self.timing.min_swing_duration
             )
 
             rotation_duration = 0.0
             # configure swing rotation
             if self.rotation_input_velocity != 0.0:
-                velocity_clamped = math.copysign(
-                    max(
-                        self.rotation_angle_scale_min, abs(self.rotation_input_velocity)
-                    ),
-                    self.rotation_input_velocity,
+                swing_rotation_end = (
+                    self.rotation_input_velocity * self.geometry.safe_angle
                 )
-                swing_rotation_end = velocity_clamped * self.rotation_working_angle
-                self.swing_rotation_path = (current_rotation_angle, swing_rotation_end)
-                speed_scale = max(0.2, abs(self.rotation_input_velocity))
-                effective_rotation_velocity = (
-                    self.rotation_swing_velocity_max * speed_scale
+                self.swing_rotation_path = (current_angle, swing_rotation_end)
+                speed_factor = max(
+                    self.motion.min_swing_velocity_factor,
+                    abs(self.rotation_input_velocity),
+                )
+                rot_velocity = (
+                    self.motion.max_rot_velocity
+                    * self.motion.swing_velocity_scale
+                    * speed_factor
                 )
                 rotation_duration = (
-                    abs(swing_rotation_end) / effective_rotation_velocity
+                    abs(swing_rotation_end - current_angle) / rot_velocity
                 )
 
             self.swing_duration = max(swing_duration, rotation_duration)
-
-    def _perform_stride(self, dt: float, gait_magnitude: float):
-        for group in self.stride_groups:
-            # get the current stride position
-            current_position = group.origin
-
-            gait_dir = self.gait_direction
-            max_step_distance = self.gait_velocity_max * gait_magnitude * dt
-            step_vector = -gait_dir * max_step_distance
-            next_position = current_position + step_vector
-
-            # if we've exited the inner stride radius, trigger a swing if possible
-            step_radius = next_position.length()
-
-            if step_radius > self.gait_working_radius:
-                self._queue_swing(group)
-
-                # clamp to outer working area if we're still waiting for the other
-                # group to complete its swing.
-                t = (step_radius - self.gait_working_radius) / (
-                    self.gait_radius_max - self.gait_working_radius
-                )
-                t = min(max(t, 0.0), 1.0)
-
-                # smoothstep easing
-                ease = (1 - t) ** 2
-                next_position = current_position + step_vector * ease
-
-            group.origin = next_position
-
-            # apply the translation
-            self.current_frame_transform.translation = next_position - current_position
-
-    def _perform_rotation(self, dt: float):
-        for stride_group in self.stride_groups:
-            group = stride_group.parent
-            if not group:
-                return
-
-            current_angle = self._get_group_angle(group)
-            delta = -self.rotation_input_velocity * self.rotation_velocity_max * dt
-            final_angle = current_angle + delta
-
-            # clamp to outer limit
-            if abs(final_angle) > self.rotation_angle_max:
-                final_angle = math.copysign(self.rotation_angle_max, final_angle)
-                delta = final_angle - current_angle
-
-            delta_rotation = Rotation.degrees(z=delta)
-            group.rotate(delta_rotation)
-
-            if abs(final_angle) > self.rotation_working_angle:
-                self._queue_swing(stride_group)
-
-            self.current_frame_transform.rotation = delta_rotation
 
     def _end_swing(self):
         if self.swing_group:
@@ -294,7 +306,7 @@ class TripodGait:
 
     def _queue_rest_position(self, dt: float):
         self.time_resting += dt
-        if self.time_resting <= self.rest_trigger_time:
+        if self.time_resting <= self.timing.rest_trigger_time:
             return
 
         furthest_distance = 2.0  # start with small epsilon
@@ -319,7 +331,18 @@ class TripodGait:
                 self._queue_swing(group, end=Vec3d(), is_rest=True)
                 return
 
-    def _get_group_angle(self, group: Frame):
+    def _smooth_clamp_stride_limit(self, step_radius: float, delta_vector: Vec3d):
+        # TODO: Maybe check where the actual stride limit is in the direction
+        # of the current gait for more possible range.
+        # clamp to outer working area if we're still waiting for the other
+        # group to complete its swing.
+        t = (step_radius - self.geometry.safe_radius) / (
+            self.geometry.max_radius - self.geometry.safe_radius
+        )
+        ease = (1 - min(max(t, 0.0), 1.0)) ** 2
+        return delta_vector * ease
+
+    def _get_rotation_group_angle(self, group: Frame):
         return (
             group.local_pos_to_frame(self.reference_frame, Vec3d(1, 0, 0))
             .to_2d()
@@ -346,7 +369,13 @@ class MotionPlanner:
     def __init__(self, body: Body, leg_relative_stand_position: Vec3d):
         self.body = body
 
-        self.gait = TripodGait(Frame(origin=self.reference_frame_pos), self.foot_offset)
+        self.gait = TripodGait(
+            Frame(origin=self.reference_frame_pos),
+            self.foot_offset,
+            GaitGeometry(),
+            GaitMotion(),
+            GaitTiming(),
+        )
 
         self.body_pos_offset_fixed = Vec3d(0, 0, 65)  # fixed body position offset in mm
         self.body_rot_offset_fixed = Vec3d()  # fixed body rotation offset in degrees
@@ -405,7 +434,7 @@ class MotionPlanner:
 
         # filter the input rate of change
         vector = lerp.rate_limit_2d(
-            dt, self.gait.gait_input_vector.to_2d(), gait_vector, self.input_filter_rate
+            dt, self.gait.input_vector.to_2d(), gait_vector, self.input_filter_rate
         )
         rotation_velocity = lerp.rate_limit(
             dt,
@@ -444,7 +473,7 @@ class MotionPlanner:
         for id, pos in positions.items():
             self.body.set_foot_position(id, self.body.frame.world_pos_to_local(pos))
 
-        self.ground_transform = self.gait.current_frame_transform
+        self.ground_transform = self.gait.ground_transform
 
     def _get_next_initial_pos(self, state: GaitState):
         if state == GaitState.STANDING:

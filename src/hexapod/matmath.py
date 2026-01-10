@@ -10,6 +10,7 @@ class Vector:
 
     def __init__(self, data: list[float]):
         self._data = data
+        self._magnitude = math.sqrt(sum(data[i] ** 2 for i in range(len(data))))
 
     def __add__(self, other: "Vector") -> "Vector":
         self._ensure_len_eq(other)
@@ -46,10 +47,10 @@ class Vector:
         return f"{self.__class__.__name__}({', '.join(vals)})"
 
     def length(self):
-        return math.sqrt(sum(self[i] ** 2 for i in range(len(self))))
+        return self._magnitude
 
     def distance_to(self, other: "Vector") -> float:
-        return abs((self - other).length())
+        return (self - other).length()
 
     def to_list(self):
         return self._data[:]

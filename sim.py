@@ -93,9 +93,6 @@ def create_ground_grid(ax):
     return lines
 
 
-GROUND_ORIGIN = Vec3d(0, 0, -60)
-
-
 def update_ground_grid_accumulated(lines: list, ground_frame: Transform):
     """
     Update ground grid based on accumulated ground_frame.
@@ -153,7 +150,7 @@ def main():
     (body_line,) = ax.plot([], [], [], "k-", lw=2)  # black line
 
     grid_lines = create_ground_grid(ax)
-    ground_frame = Frame(origin=GROUND_ORIGIN, rotation=Rotation.identity())
+    ground_frame = Frame()
 
     DT = 1 / 20  # simulating can't go much faster
 

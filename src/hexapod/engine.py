@@ -68,7 +68,12 @@ class Vec2d(Vector):
 
 class Vec3d(Vector):
     def __init__(self, x: float = 0.0, y: float = 0.0, z: float = 0.0):
-        return super().__init__([x, y, z])
+        super().__init__([x, y, z])
+        l = self.length()
+        if l == 0:
+            self._normalized = [0, 0, 0]
+        else:
+            self._normalized = [x / l, y / l, z / l]
 
     def __add__(self, other: "Vec3d") -> "Vec3d":
         return Vec3d(*super().__add__(other)._data)
@@ -116,10 +121,7 @@ class Vec3d(Vector):
         )
 
     def normalize(self) -> "Vec3d":
-        l = self.length()
-        if l == 0:
-            return Vec3d(0, 0, 0)
-        return Vec3d(*(self / l))
+        return Vec3d(*self._normalized)
 
     def to_transform(self):
         return Transform.create(translation=self)
