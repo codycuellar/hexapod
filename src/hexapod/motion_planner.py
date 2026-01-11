@@ -36,15 +36,19 @@ class GaitGeometry:
 class GaitMotion:
     max_velocity = 225.0  # mm/s
     max_rot_velocity = 35  # degrees / second
-    swing_velocity_scale = 1.5  # factor of max velocity
+    swing_velocity_scale = 1.75  # factor of max velocity
     min_swing_velocity_factor = 0.3  # factor of max velocity
+
+    max_swing_velocity = max_velocity * swing_velocity_scale
+    min_swing_velocity = max_swing_velocity * min_swing_velocity_factor
+    max_swing_rot_velocity = max_rot_velocity * swing_velocity_scale
+    min_swing_rot_velocity = max_swing_rot_velocity * min_swing_velocity_factor
 
 
 @dataclass
 class GaitTiming:
     swing_duration_resting = 0.35  # seconds
-    min_swing_time = 0.2  # seconds
-    min_swing_duration = 0.10  # seconds
+    max_swing_duration = 1.0  # seconds
     rest_trigger_time = 0.75  # seconds
 
 
@@ -58,6 +62,7 @@ class TripodGait:
         timing: GaitTiming,
     ):
         self.reference_frame = reference_frame
+        self.leg_offset = leg_offset
         self.geometry = geometry
         self.motion = motion
         self.timing = timing
@@ -70,11 +75,10 @@ class TripodGait:
         self.rotation_input_velocity = 0.0  # unit-range factor
 
         self.swing_phase = 0.0
-        self.swing_elapsed = 0.0
-        self.swing_duration = 0.0
-        self.swing_path = (Vec3d(), Vec3d(), Vec3d(), Vec3d())
+        self.swing_path = tuple([Vec3d()] * 8)
+        self.swing_v_distance = 0.0
         self.swing_rotation_path = (0.0, 0.0)
-        self.rotation_offset = Vec3d()
+        self.swing_rotation_offset = Vec3d()
 
         self.rotate_group_a = Frame(parent=reference_frame)
         self.stride_group_a = Frame(parent=self.rotate_group_a)
@@ -201,42 +205,53 @@ class TripodGait:
             self.ground_transform.rotation = delta_rotation
 
     def _perform_swing(self, dt: float):
-        if not self.swing_group:
-            raise ValueError("Leg swing performed, but no swing group assigned.")
-        if not self.swing_group.parent:
+        if not self.swing_group or not self.swing_group.parent:
             return
 
-        self.swing_elapsed += dt
-        self.swing_phase = min(1.0, self.swing_elapsed / self.swing_duration)
-        pos = lerp.cubic_bez_3d(self.swing_phase, *self.swing_path)
+        trans_phase_inc = (self._current_swing_speed() * dt) / self.swing_v_distance
+        rotation_distance = abs(
+            self.swing_rotation_path[1] - self.swing_rotation_path[0]
+        )
 
-        self.swing_group.origin = pos
+        if rotation_distance > 0.01:
+            distance = math.radians(rotation_distance) * self.leg_offset.length()
+            rot_phase_inc = (self._current_swing_rot_speed() * dt) / distance
+        else:
+            rot_phase_inc = trans_phase_inc
 
+        avg_phase = (trans_phase_inc + rot_phase_inc) / 2
+        self.swing_phase = min(self.swing_phase + avg_phase, 1.0)
+
+        if self.swing_phase < 0.5:
+            local_t = self.swing_phase / 0.5
+            segment = self.swing_path[0:4]  # (start, p1, p2, midpoint)
+        else:
+            local_t = (self.swing_phase - 0.5) / 0.5
+            segment = self.swing_path[4:8]  # (midpoint, p5, p6, end)
+
+        self.swing_group.origin = lerp.cubic_bez_3d(local_t, *segment)
         angle = lerp.lerp(self.swing_phase, *self.swing_rotation_path)
         self.swing_group.parent.rotation = Rotation.degrees(z=angle)
 
         if self.swing_phase >= 1.0:
             self._end_swing()
 
-    def _queue_swing(
-        self, group: Frame, end: Vec3d | None = None, is_rest: bool = False
-    ):
-        if self.swing_group:
-            return
-        elif not group.parent:
-            raise ValueError("TripodGait incorrectly setup without a rotation parent.")
+    def _current_ground_velocity(self):
+        return self.input_vector * self.motion.max_rot_velocity
 
-        self.swing_group = group
-        self.stride_groups.remove(group)
-        self.swing_phase = 0.0
-        self.swing_elapsed = 0.0
+    def _current_swing_speed(self):
+        return max(
+            self.motion.min_swing_velocity,
+            self.input_vector.length() * self.motion.max_swing_velocity,
+        )
 
-        start = group.origin
-        # TODO: A more smooth approach would be to sample two halves of the curve,
-        # with control points like the following so the initial swing continues
-        # the motion path of the stride momentarily. Then the inverse for the
-        # second half of the phase to guide a smoth transition into stride.
-        # [(0 ,0) (-0.5, 0), (1, 0), (0.5, 1)]
+    def _current_swing_rot_speed(self):
+        return max(
+            self.motion.min_swing_rot_velocity,
+            abs(self.rotation_input_velocity) * self.motion.max_swing_rot_velocity,
+        )
+
+    def _make_swing_path(self, start: Vec3d, end: Vec3d | None = None):
         if not end:
             end = (
                 self.input_vector.normalize()
@@ -244,60 +259,50 @@ class TripodGait:
                 * 0.95  # small shirinkage so we don't plant ON the safe zone edge
             )
 
-        self.swing_path = (
-            start,
-            Vec3d(start.x, start.y, start.z + self.geometry.step_height),
-            Vec3d(end.x, end.y, end.z + self.geometry.step_height),
-            end,
+        midpoint = ((end + start) / 2).replace(z=self.geometry.step_height)
+
+        self.swing_v_distance = start.distance_to(midpoint) + midpoint.distance_to(end)
+
+        swing_speed = self._current_swing_speed()
+        segment_t = (self.swing_v_distance / swing_speed) / 2
+
+        transition_point = (self._current_ground_velocity() * segment_t) / 3
+        p1 = start - transition_point
+
+        midpoint_velocity = (end - start).normalize() * swing_speed
+        midpoint_offset = (midpoint_velocity * segment_t) / 3
+
+        p2 = midpoint - midpoint_offset
+        p5 = midpoint + midpoint_offset
+
+        p6 = end + transition_point
+        return (start, p1, p2, midpoint, midpoint, p5, p6, end)
+
+    def _queue_swing(
+        self, group: Frame, end: Vec3d | None = None, is_rest: bool = False
+    ):
+        if self.swing_group:
+            # if we already have a swing group, we can't queue up yet, try again next timestep
+            return
+        elif not group.parent:
+            raise ValueError("TripodGait incorrectly setup without a rotation parent.")
+
+        self.swing_group = group
+        self.stride_groups.remove(group)
+        self.swing_phase = 0.0
+
+        self.swing_path = self._make_swing_path(group.origin, end)
+
+        swing_rotation_end = 0.0
+        if not is_rest and self.rotation_input_velocity != 0.0:
+            swing_rotation_end = (
+                self.rotation_input_velocity * self.geometry.safe_angle * 0.95
+            )
+
+        self.swing_rotation_path = (
+            self._get_rotation_group_angle(group.parent),
+            swing_rotation_end,
         )
-
-        # TODO: maybe better appraoch is to sample the current angle velocity
-        # and use that to determine where to put the end ancle
-        current_angle = self._get_rotation_group_angle(group.parent)
-        # always try to recenter the angle
-        self.swing_rotation_path = (current_angle, 0.0)
-
-        if is_rest:
-            self.swing_duration = self.timing.swing_duration_resting
-        else:
-            # TODO: This whole section is messy. We should start with VELOCITY
-            # probably rather than duration directly. That way during a swing,
-            # we can dynamically adjust the landing spot and swing velocities.
-            # This current approach suffers from slow initial velocity, but stride
-            # ramping up, ends up hitting stride limits waiting for the slow swing.
-            speed_factor = max(
-                self.input_vector.length(), self.motion.min_swing_velocity_factor
-            )
-            swing_velocity = (
-                self.motion.max_velocity
-                * self.motion.swing_velocity_scale
-                * speed_factor
-            )
-            swing_duration = max(
-                start.distance_to(end) / swing_velocity, self.timing.min_swing_duration
-            )
-
-            rotation_duration = 0.0
-            # configure swing rotation
-            if self.rotation_input_velocity != 0.0:
-                swing_rotation_end = (
-                    self.rotation_input_velocity * self.geometry.safe_angle
-                )
-                self.swing_rotation_path = (current_angle, swing_rotation_end)
-                speed_factor = max(
-                    self.motion.min_swing_velocity_factor,
-                    abs(self.rotation_input_velocity),
-                )
-                rot_velocity = (
-                    self.motion.max_rot_velocity
-                    * self.motion.swing_velocity_scale
-                    * speed_factor
-                )
-                rotation_duration = (
-                    abs(swing_rotation_end - current_angle) / rot_velocity
-                )
-
-            self.swing_duration = max(swing_duration, rotation_duration)
 
     def _end_swing(self):
         if self.swing_group:

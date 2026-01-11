@@ -132,6 +132,15 @@ class Vec3d(Vector):
     def copy(self) -> "Vec3d":
         return Vec3d(*self._data)
 
+    def replace(
+        self, x: float | None = None, y: float | None = None, z: float | None = None
+    ):
+        return Vec3d(
+            x if x is not None else self._data[0],
+            y if y is not None else self._data[1],
+            z if z is not None else self._data[2],
+        )
+
 
 class Rotation(Matrix):
     """
