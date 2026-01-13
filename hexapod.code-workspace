@@ -1,0 +1,54 @@
+{
+  "folders": [
+    {
+      "name": "Controller (MicroPython)",
+      "path": "src/controller",
+      "settings": {
+        "python.analysis.typeshedPaths": [
+          "~/.micropico-stubs/included",
+          "${workspaceFolder}/typings"
+        ],
+        "python.analysis.extraPaths": [
+          "~/.micropico-stubs/included"
+        ],
+        "editor.formatOnSave": true,
+        "micropico.openOnStart": true,
+        "micropico.autoConnect": true,
+        "micropico.syncFolder": "."
+      }
+    },
+    {
+      "name": "Hexapod (Raspberry Pi)",
+      "path": "src/hexapod",
+      "settings": {
+        "python.analysis.typeshedPaths": [],
+        "python.analysis.extraPaths": []
+      }
+    },
+    {
+      "name": "Visualizer (Dev Machine)",
+      "path": "src/visualizer",
+      "settings": {
+        "python.analysis.typeshedPaths": [],
+        "python.analysis.extraPaths": []
+      }
+    },
+    {
+      "name": "Root",
+      "path": "."
+    }
+  ],
+  "settings": {
+    "python.languageServer": "Pylance",
+    "python.analysis.typeCheckingMode": "basic",
+    "python.analysis.diagnosticSeverityOverrides": {
+      "reportMissingModuleSource": "none"
+    },
+    "python.terminal.activateEnvironment": false,
+    "editor.defaultFormatter": "ms-python.black-formatter",
+    "micropico.syncFileTypes": [
+      "py"
+    ]
+  }
+}
+

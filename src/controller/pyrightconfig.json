@@ -1,0 +1,19 @@
+{
+  "include": [
+    "."
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/node_modules"
+  ],
+  "stubPath": "../../typings",
+  "extraPaths": [
+    "~/.micropico-stubs/included"
+  ],
+  "pythonVersion": "3.5",
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false,
+  "reportMissingModuleSource": "none",
+  "typeCheckingMode": "standard"
+}
+
