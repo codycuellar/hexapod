@@ -10,7 +10,7 @@ from typing import cast
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
 
-from controller.gamepad import GamePad
+from hexapod.gamepad import GamePad
 from hexapod.hexpod import Body, Leg, LegID
 from hexapod.engine import Frame, Vec3d, Vec2d, Rotation, Transform
 from hexapod.servos import MockServo

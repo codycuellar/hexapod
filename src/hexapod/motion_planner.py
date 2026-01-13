@@ -26,18 +26,18 @@ class GaitState(Enum):
 @dataclass
 class GaitGeometry:
     step_height = 25.0  # mm
-    safe_radius = 45.0  # mm
+    safe_radius = 35.0  # mm
     max_radius = 65.0  # mm
-    safe_angle = 12  # degrees
+    safe_angle = 10  # degrees
     max_angle = 18  # degrees
 
 
 @dataclass
 class GaitMotion:
-    max_velocity = 225.0  # mm/s
-    max_rot_velocity = 35  # degrees / second
-    swing_velocity_scale = 1.75  # factor of max velocity
-    min_swing_velocity_factor = 0.3  # factor of max velocity
+    max_velocity = 175.0  # mm/s
+    max_rot_velocity = 45  # degrees / second
+    swing_velocity_scale = 1.45  # factor of max velocity
+    min_swing_velocity_factor = 0.4  # factor of max velocity
 
     max_swing_velocity = max_velocity * swing_velocity_scale
     min_swing_velocity = max_swing_velocity * min_swing_velocity_factor
@@ -209,18 +209,18 @@ class TripodGait:
             return
 
         trans_phase_inc = (self._current_swing_speed() * dt) / self.swing_v_distance
-        rotation_distance = abs(
-            self.swing_rotation_path[1] - self.swing_rotation_path[0]
-        )
+        rotation_angle = abs(self.swing_rotation_path[1] - self.swing_rotation_path[0])
 
-        if rotation_distance > 0.01:
-            distance = math.radians(rotation_distance) * self.leg_offset.length()
-            rot_phase_inc = (self._current_swing_rot_speed() * dt) / distance
+        if rotation_angle > 0.01:
+            arc_len = math.radians(rotation_angle) * self.leg_offset.length()
+            rot_speed_rad = math.radians(self._current_swing_rot_speed())
+            rot_phase_inc = (rot_speed_rad * self.leg_offset.length() * dt) / arc_len
         else:
             rot_phase_inc = trans_phase_inc
 
-        avg_phase = (trans_phase_inc + rot_phase_inc) / 2
-        self.swing_phase = min(self.swing_phase + avg_phase, 1.0)
+        phase_inc = min(trans_phase_inc, rot_phase_inc)
+        self.swing_phase = min(self.swing_phase + phase_inc, 1.0)
+        print(trans_phase_inc, rot_phase_inc, self.swing_v_distance, rotation_angle)
 
         if self.swing_phase < 0.5:
             local_t = self.swing_phase / 0.5
@@ -234,10 +234,12 @@ class TripodGait:
         self.swing_group.parent.rotation = Rotation.degrees(z=angle)
 
         if self.swing_phase >= 1.0:
+            print()
+            print()
             self._end_swing()
 
     def _current_ground_velocity(self):
-        return self.input_vector * self.motion.max_rot_velocity
+        return -self.input_vector * self.motion.max_rot_velocity
 
     def _current_swing_speed(self):
         return max(
@@ -275,7 +277,7 @@ class TripodGait:
         p2 = midpoint - midpoint_offset
         p5 = midpoint + midpoint_offset
 
-        p6 = end + transition_point
+        p6 = end - transition_point
         return (start, p1, p2, midpoint, midpoint, p5, p6, end)
 
     def _queue_swing(
@@ -367,9 +369,9 @@ class MotionPlanner:
     rot_offset_roc = 18  # deg/s
 
     reference_frame_pos = Vec3d(0, 0, 0)
-    foot_offset = Vec3d(225, 0, 0)
+    foot_offset = Vec3d(190, 0, 0)
 
-    input_filter_rate = 6.0  # change/seconds
+    input_filter_rate = 4.5  # change/seconds
 
     def __init__(self, body: Body, leg_relative_stand_position: Vec3d):
         self.body = body
