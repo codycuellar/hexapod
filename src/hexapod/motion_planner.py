@@ -25,7 +25,7 @@ class GaitState(Enum):
 
 @dataclass
 class GaitGeometry:
-    step_height = 25.0  # mm
+    step_height = 65.0  # mm
     safe_radius = 35.0  # mm
     max_radius = 65.0  # mm
     safe_angle = 10  # degrees
