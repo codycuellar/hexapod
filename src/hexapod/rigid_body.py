@@ -110,13 +110,16 @@ class Leg:
         # Calculate RAW IK angles
         cox_a, fem_a, tib_a = self._calculate_ik(position)
 
+        tib_a = tib_a - 180
         # Set joint angles and update frames
         self.coxa_control.set_angle(cox_a)
         self.femur_control.set_angle(fem_a)
         self.tibia_control.set_angle(tib_a)
         self.coxa_frame.rotation = Rotation.degrees(z=cox_a)
+        # negative because in 3d world, counter clockwise looking from -y is a
+        # negative rotation angle.
         self.femur_frame.rotation = Rotation.degrees(y=-fem_a)
-        self.tibia_frame.rotation = Rotation.degrees(y=-(tib_a - 180))
+        self.tibia_frame.rotation = Rotation.degrees(y=-tib_a)
 
     def update(self):
         """Update all joint controllers (send commands to hardware)."""

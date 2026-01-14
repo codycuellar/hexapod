@@ -15,8 +15,8 @@ class JointControl:
     def get_angle(self) -> float:
         return 0.0
 
-    def update(self):
-        return
+    def get_command_message(self) -> str:
+        return ""
 
 
 class JointCalibration:
@@ -71,25 +71,18 @@ class Servo(JointControl):
     Converts frame angles to servo angles and sends commands to hardware.
     """
 
-    @staticmethod
-    def create_cluster(pin_numbers: list):
-        """Create a servo cluster for hardware control."""
-        from servo import ServoCluster as RawCluster
-
-        return RawCluster(0, 0, pin_numbers)
-
     def __init__(
         self,
-        cluster,
         pin_number: int,
-        zero_offset: float,
-        min_angle: float,
-        max_angle: float,
+        raw_zero_offset: float,
+        min_angle: float = -90,
+        max_angle: float = 90,
         inverted: bool = False,
     ):
-        self.cluster = cluster
         self.pin_number = pin_number
-        self.calibration = JointCalibration(zero_offset, min_angle, max_angle, inverted)
+        self.calibration = JointCalibration(
+            raw_zero_offset, min_angle, max_angle, inverted
+        )
         self.frame_angle: float = 0.0
 
     def set_angle(self, frame_angle: float):
@@ -97,30 +90,14 @@ class Servo(JointControl):
         Set the angle in frame space (degrees).
         Angle is clamped to limits automatically.
         """
-        self.frame_angle = self.calibration.clamp_frame_angle(frame_angle)
+        self.frame_angle = frame_angle
 
-    def get_frame_angle(self) -> float:
-        """Get current angle in frame space."""
-        return self.frame_angle
-
-    def get_control_angle(self) -> float:
-        """
-        Get the current raw control angle from hardware.
-        For Servo, this reads the actual servo position.
-        Returns the raw servo angle (not frame angle).
-        """
-        # In a real implementation, this would read from hardware:
-        # return self.cluster.read_angle(self.pin_number)
-        # For now, calculate from stored frame_angle
-        return self.calibration.frame_to_servo_angle(self.frame_angle)
-
-    def update(self):
-        """
-        Send the current frame angle to the servo hardware.
-        Converts frame angle to servo angle and sends command.
-        """
+    def get_angle(self) -> float:
         servo_angle = self.calibration.frame_to_servo_angle(self.frame_angle)
-        return self.cluster.value(self.pin_number, servo_angle)
+        return self.calibration.clamp_frame_angle(servo_angle)
+
+    def get_command_message(self) -> str:
+        return f"{self.pin_number}:{self.get_angle():0.2f}"
 
 
 class MockServo(JointControl):
@@ -136,14 +113,6 @@ class MockServo(JointControl):
         """Set the angle in frame space (degrees)."""
         self.frame_angle = frame_angle
 
-    def get_frame_angle(self) -> float:
-        """Get current angle in frame space."""
-        return self.frame_angle
-
-    def get_control_angle(self) -> float:
+    def get_angle(self) -> float:
         """Get control angle (same as frame angle for simple control)."""
         return self.frame_angle
-
-    def update(self):
-        """Update method (no-op for simulation)."""
-        pass

@@ -1,55 +1,55 @@
-# from pimoroni import Button
+import gc
+import sys
+import uselect
 from servo import ServoCluster, servo2040
 
-import sys, select, time
-import gc
+
+def main():
+    gc.collect()
+
+    # Use ONE cluster to save all hardware resources
+    pins = list(range(servo2040.SERVO_1, servo2040.SERVO_18 + 1))
+    cluster = ServoCluster(0, 0, pins)
+
+    spoll = uselect.poll()
+    spoll.register(sys.stdin, uselect.POLLIN)
+
+    print("servo connected")
+
+    while True:
+        if spoll.poll(0):
+            command = sys.stdin.readline().strip()
+            if not command:
+                continue
+
+            try:
+                angles_raw = command.split(",")
+                for angle_raw in angles_raw:
+                    if ":" not in angle_raw:
+                        continue
+                    pin, angle = angle_raw.split(":")
+                    cluster.value(int(pin), float(angle))
+
+                # print("servos updated")
+            except Exception as e:
+                # Log to serial so you see it on your PC immediately
+                print("RUNTIME_ERROR:", e)
+                log_to_file("Runtime: " + str(e))
 
 
-gc.collect()
-
-time.sleep(1)
-print("Servo2040 online")
-
-
-poll = select.poll()
-poll.register(sys.stdin, select.POLLIN)
-
-
-cluster_1_pins = list(p for p in range(servo2040.SERVO_1, servo2040.SERVO_6 + 1))
-cluster_2_pins = list(p for p in range(servo2040.SERVO_1, servo2040.SERVO_6 + 1))
-cluster_3_pins = list(p for p in range(servo2040.SERVO_1, servo2040.SERVO_6 + 1))
-
-clusters = {
-    "1": ServoCluster(0, 0, cluster_1_pins),
-    "2": ServoCluster(0, 1, cluster_2_pins),
-    "3": ServoCluster(0, 1, cluster_3_pins),
-}
+def log_to_file(error_msg):
+    try:
+        with open("log.txt", "a") as f:  # "a" for append so you don't lose old logs
+            f.write(str(error_msg) + "\n")
+    except:
+        # If we can't write to file (e.g. no memory), at least we tried
+        pass
 
 
-pin_mappings = {}
-
-for pin in cluster_1_pins:
-    pin_mappings[str(pin)] = "1"
-
-for pin in cluster_1_pins:
-    pin_mappings[str(pin)] = "2"
-
-for pin in cluster_1_pins:
-    pin_mappings[str(pin)] = "3"
-
-
-def get_cluster(pin_num: str) -> ServoCluster:
-    cluster_num = pin_mappings[pin_num]
-    return clusters[cluster_num]
-
-
-while True:
-    if poll.poll(0):
-        line = sys.stdin.readline().strip()
-        angles_raw = line.split(",")
-        for angle_raw in angles_raw:
-            pin, angle = angle_raw.split(":")
-            cluster = get_cluster(pin)
-            cluster.value(int(pin), float(angle))
-            cluster_num = pin_mappings[pin]
-            print("moving servo", pin, "in cluster", cluster, "with angle", angle)
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        # This catches "Fatal" crashes that stop the whole script
+        print("FATAL_ERROR:", e)
+        log_to_file("Fatal: " + str(e))

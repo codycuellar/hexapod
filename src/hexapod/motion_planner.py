@@ -12,7 +12,7 @@ import math
 from enum import Enum, auto
 from dataclasses import dataclass
 
-from hexapod.hexpod import Body, LegID
+from hexapod.rigid_body import Body, LegID
 from hexapod.engine import Vec3d, Vec2d, Frame, Rotation, Transform
 import hexapod.interpolation as lerp
 
@@ -220,7 +220,6 @@ class TripodGait:
 
         phase_inc = min(trans_phase_inc, rot_phase_inc)
         self.swing_phase = min(self.swing_phase + phase_inc, 1.0)
-        print(trans_phase_inc, rot_phase_inc, self.swing_v_distance, rotation_angle)
 
         if self.swing_phase < 0.5:
             local_t = self.swing_phase / 0.5
@@ -234,8 +233,6 @@ class TripodGait:
         self.swing_group.parent.rotation = Rotation.degrees(z=angle)
 
         if self.swing_phase >= 1.0:
-            print()
-            print()
             self._end_swing()
 
     def _current_ground_velocity(self):
