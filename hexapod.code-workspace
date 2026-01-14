@@ -26,8 +26,8 @@
       }
     },
     {
-      "name": "Visualizer (Dev Machine)",
-      "path": "src/visualizer",
+      "name": "Simulations (Dev Machine)",
+      "path": "src/sim",
       "settings": {
         "python.analysis.typeshedPaths": [],
         "python.analysis.extraPaths": []

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hexapod"
+version = "0.1.0"
+description = "Hexapod control, controller firmware helpers, and visualization"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Cody Cuellar" }]
+dependencies = []
+
+# Optional extras keep each deployment separated:
+# - controller (MicroPython) runs on the Pico; no desktop deps
+# - hexapod (RPi service) needs gamepad input package
+# - visualizer (dev machine) needs plotting and serial comms
+[project.optional-dependencies]
+controller = []
+hexapod = ["inputs>=0.5", "pyserial>=3.5"]
+sim = ["matplotlib>=3.10.1"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
