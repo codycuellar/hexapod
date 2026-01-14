@@ -7,13 +7,14 @@ Hardcoded hexapod creation for simulation - no config needed.
 import time
 from typing import cast
 
+import serial
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
 
 from hexapod.gamepad import GamePad
-from hexapod.hexpod import Body, Leg, LegID
+from hexapod.rigid_body import Body, Leg, LegID
 from hexapod.engine import Frame, Vec3d, Vec2d, Rotation, Transform
-from hexapod.servos import MockServo
+from hexapod.servos import MockServo, Servo
 from hexapod.motion_planner import MotionPlanner
 
 
@@ -42,12 +43,73 @@ def create_simulation_hexapod() -> Body:
         frame = Frame(origin=mount_pos, rotation=origin_frame.rotation)
         legs[id] = Leg(id, frame, *leg_setup)
         origin_frame.rotate(Rotation.degrees(0.0, 0.0, 60.0))
+    legs[LegID.RF] = Leg(
+        LegID.RF,
+        legs[LegID.RF].frame,
+        COXA_LEN,
+        FEMUR_LEN,
+        TIBIA_LEN,
+        Servo(3, -6.0, inverted=True),
+        Servo(4, -30.0, inverted=False),
+        Servo(5, 67.0, inverted=True),
+    )
+    legs[LegID.RM] = Leg(
+        LegID.RM,
+        legs[LegID.RM].frame,
+        COXA_LEN,
+        FEMUR_LEN,
+        TIBIA_LEN,
+        Servo(6, -7.0, inverted=True),
+        Servo(7, -30.0, inverted=False),
+        Servo(8, 65.0, inverted=True),
+    )
+    legs[LegID.RB] = Leg(
+        LegID.RB,
+        legs[LegID.RB].frame,
+        COXA_LEN,
+        FEMUR_LEN,
+        TIBIA_LEN,
+        Servo(9, 0.0, inverted=True),
+        Servo(10, -26.0, inverted=False),
+        Servo(11, 73.0, inverted=True),
+    )
+    legs[LegID.LF] = Leg(
+        LegID.LF,
+        legs[LegID.LF].frame,
+        COXA_LEN,
+        FEMUR_LEN,
+        TIBIA_LEN,
+        Servo(0, 2.0, inverted=True),
+        Servo(1, 24.0, inverted=True),
+        Servo(2, -80.0, inverted=False),
+    )
+    legs[LegID.LM] = Leg(
+        LegID.LM,
+        legs[LegID.LM].frame,
+        COXA_LEN,
+        FEMUR_LEN,
+        TIBIA_LEN,
+        Servo(15, -4.0, inverted=True),
+        Servo(16, 27.0, inverted=True),
+        Servo(17, -85.0, inverted=False),
+    )
+    legs[LegID.LB] = Leg(
+        LegID.LB,
+        legs[LegID.LB].frame,
+        COXA_LEN,
+        FEMUR_LEN,
+        TIBIA_LEN,
+        Servo(12, -4.0, inverted=True),
+        Servo(13, 31.0, inverted=True),
+        Servo(14, -77.0, inverted=False),
+    )
 
     return Body(Frame(), legs)
 
 
 def draw_hexapod(ax, body: Body, leg_lines, body_line):
     for leg_id, leg in body.legs.items():
+        leg.coxa_frame
         p0 = leg.coxa_frame.get_origin_in_world()
         p1 = leg.femur_frame.get_origin_in_world()
         p2 = leg.tibia_frame.get_origin_in_world()
@@ -121,14 +183,17 @@ def update_ground_grid_accumulated(lines: list, ground_frame: Transform):
 
 
 def main():
+    comport = serial.Serial("COM3", 115200)
+    comport.reset_input_buffer()
+
     print("Creating hexapod...")
-    hexapod = create_simulation_hexapod()
+    body = create_simulation_hexapod()
 
     gamepad = GamePad()
     gamepad.start_reading()
 
     print("Creating path planner...")
-    motion_planner = MotionPlanner(hexapod, Vec3d(140, 0, -80))
+    motion_planner = MotionPlanner(body, Vec3d(140, 0, -80))
     motion_planner.initialize()
 
     plt.ion()
@@ -144,7 +209,7 @@ def main():
     plt.show(block=False)
 
     leg_lines = {}
-    for leg_id in hexapod.legs:
+    for leg_id in body.legs:
         (line,) = ax.plot([], [], [], "o-", lw=2)
         leg_lines[leg_id] = line
     (body_line,) = ax.plot([], [], [], "k-", lw=2)  # black line
@@ -208,7 +273,14 @@ def main():
 
         # draw ground grid using the accumulated frame
         update_ground_grid_accumulated(grid_lines, ground_frame)
-        draw_hexapod(ax, hexapod, leg_lines, body_line)
+        draw_hexapod(ax, body, leg_lines, body_line)
+
+        msg = body.get_command_message()
+        # print(msg)
+        comport.write((msg + "\n").encode("utf-8"))
+        if comport.in_waiting > 0:
+            response = comport.readline().decode("utf-8").strip()
+            print(f"Pico says: {response}")
 
         fig.canvas.draw()
         plt.pause(0.001)  # <-- GUI event pump only

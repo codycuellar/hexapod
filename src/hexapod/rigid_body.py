@@ -46,10 +46,18 @@ class Body:
         leg = self.legs[leg_id]
         return leg.foot_frame.get_origin_in_frame(self.frame)
 
-    def update(self):
-        """Update all leg controllers."""
+    def get_command_message(self):
+        angle_strs = []
         for leg in self.legs.values():
-            leg.update()
+            servos = []
+            servos.append(leg.coxa_control.get_command_message())
+            servos.append(leg.femur_control.get_command_message())
+            servos.append(leg.tibia_control.get_command_message())
+            for servo in servos:
+                if servo:
+                    angle_strs.append(servo)
+
+        return ",".join(angle_strs)
 
 
 class Leg:
@@ -110,22 +118,22 @@ class Leg:
         # Calculate RAW IK angles
         cox_a, fem_a, tib_a = self._calculate_ik(position)
 
-        tib_a = tib_a - 180
+        # fem_a is the 2d positive angle (counter clockwise), but in 3d, with y
+        # axis away, this is a negative rotation
+        fem_a = -fem_a
+        # tib_a is the openness angle of the tibia, but our reference is straight out,
+        # which would be 180 degrees.
+        tib_a = -(tib_a - 180)
+
         # Set joint angles and update frames
         self.coxa_control.set_angle(cox_a)
         self.femur_control.set_angle(fem_a)
         self.tibia_control.set_angle(tib_a)
         self.coxa_frame.rotation = Rotation.degrees(z=cox_a)
-        # negative because in 3d world, counter clockwise looking from -y is a
-        # negative rotation angle.
-        self.femur_frame.rotation = Rotation.degrees(y=-fem_a)
-        self.tibia_frame.rotation = Rotation.degrees(y=-tib_a)
-
-    def update(self):
-        """Update all joint controllers (send commands to hardware)."""
-        self.coxa_control.update()
-        self.femur_control.update()
-        self.tibia_control.update()
+        # negative because in 3d world, clockwise looking from -y is a
+        # positive rotation angle.
+        self.femur_frame.rotation = Rotation.degrees(y=fem_a)
+        self.tibia_frame.rotation = Rotation.degrees(y=tib_a)
 
     def _calculate_ik(self, position: Vec3d) -> list[float]:
         """

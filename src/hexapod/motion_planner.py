@@ -34,8 +34,8 @@ class GaitGeometry:
 
 @dataclass
 class GaitMotion:
-    max_velocity = 175.0  # mm/s
-    max_rot_velocity = 45  # degrees / second
+    max_velocity = 275.0  # mm/s
+    max_rot_velocity = 65  # degrees / second
     swing_velocity_scale = 1.45  # factor of max velocity
     min_swing_velocity_factor = 0.4  # factor of max velocity
 
@@ -366,7 +366,7 @@ class MotionPlanner:
     rot_offset_roc = 18  # deg/s
 
     reference_frame_pos = Vec3d(0, 0, 0)
-    foot_offset = Vec3d(190, 0, 0)
+    foot_offset = Vec3d(210, 0, 0)
 
     input_filter_rate = 4.5  # change/seconds
 
