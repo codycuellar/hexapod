@@ -111,15 +111,13 @@ class Leg:
         fem_a = -fem_a
         # tib_a is the openness angle of the tibia, but our reference is straight out,
         # which would be 180 degrees.
-        tib_a = -(tib_a - 180)
+        tib_a = -tib_a
 
         # Set joint angles and update frames
         self.coxa_control.set_angle(cox_a)
         self.femur_control.set_angle(fem_a)
         self.tibia_control.set_angle(tib_a)
         self.coxa_frame.rotation = Rotation.degrees(z=cox_a)
-        # negative because in 3d world, clockwise looking from -y is a
-        # positive rotation angle.
         self.femur_frame.rotation = Rotation.degrees(y=fem_a)
         self.tibia_frame.rotation = Rotation.degrees(y=tib_a)
 
@@ -148,20 +146,42 @@ class Leg:
         Returns:
             The raw angles of each frame.
         """
-        cox_len = self.coxa_length
-        fem_len = self.femur_length
-        tib_len = self.tibia_length
+        # The ground plane position (when observing from the top)
+        xy_pos = position.to_2d()
 
-        vec2 = Vec2d(position.x, position.y)
+        coxa_angle = xy_pos.angle_x()
 
-        a1 = vec2.angle_x()
+        xy_dist = abs(xy_pos.length() - self.coxa_length)
+        hypot_len = Vec2d(position.z, xy_dist).length()
 
-        xy_len = max(0, vec2.length() - cox_len)
-        zH = Vec2d(position.z, xy_len).length()
+        femur_sqr = self.femur_length**2
+        tibia_sqr = self.tibia_length**2
+        hypot_squared = hypot_len**2
 
-        max_reach = fem_len + tib_len
+        femur_theta = (femur_sqr + hypot_squared - tibia_sqr) / (
+            2 * self.femur_length * hypot_len
+        )
+
+        femur_interior_angle = math.acos(clamp(femur_theta, -1.0, 1.0))
+        foot_angle_from_x_axis = math.atan2(position.z, xy_dist)
+
+        femur_angle = femur_interior_angle + foot_angle_from_x_axis
+
+        tibia_angle = (femur_sqr + tibia_sqr - hypot_len**2) / (
+            2 * self.tibia_length * self.femur_length
+        )
+
+        tibia_angle = math.acos(clamp(tibia_angle, -1.0, 1.0))
+
+        return [
+            math.degrees(a) for a in [coxa_angle, femur_angle, tibia_angle - math.pi]
+        ]
+
+    def clamp_reach(self, position: Vec3d, femur_to_foot_dist: float):
         # Clamp reach distance to maximum if it exceeds (with small tolerance)
-        if zH > max_reach + 1e-6:
+        fem_tib_reach = self.femur_length + self.tibia_length
+
+        if femur_to_foot_dist > fem_tib_reach + 1e-6:
             # Scale the position vector to be within reach
             # Keep the direction, just reduce the magnitude
             position_mag = position.length()
@@ -169,22 +189,18 @@ class Leg:
                 # Calculate what the max reachable distance is from coxa
                 # TODO: This doesn't factor in the rigid Z axis of the coxa.
                 direction = position.normalize()
-                new_position = direction * (cox_len + max_reach)
+                new_position = direction * (self.coxa_length + fem_tib_reach)
                 # Recalculate after scaling
-                xy_len = max(
-                    0, Vec2d(new_position.x, new_position.y).length() - cox_len
-                )
-                zH = Vec2d(new_position.z, xy_len).length()
+                xy_dist = max(0, new_position.to_2d().length() - self.coxa_length)
+                femur_to_foot_dist = Vec2d(new_position.z, xy_dist).length()
                 logger.warning(
                     f"Leg {self.id} maximum reach attempted! Clamping {position} to {new_position}"
                 )
-                position = new_position
+                return new_position
 
-        a2cos = (fem_len**2 + zH**2 - tib_len**2) / (2 * fem_len * zH)
-        a2 = math.acos(max(-1.0, min(1.0, a2cos)))
-        a2 = a2 + math.atan2(position.z, xy_len)
+        return position
 
-        a3cos = (fem_len**2 + tib_len**2 - zH**2) / (2 * tib_len * fem_len)
-        a3 = math.acos(max(-1.0, min(1.0, a3cos)))
 
-        return [math.degrees(a) for a in [a1, a2, a3]]
+def clamp(value: float, _min: float, _max: float) -> float:
+    """Hard clamp a value between min and max."""
+    return max(_min, min(_max, value))
