@@ -8,10 +8,10 @@ class Vec2d(Vector):
     def __init__(self, x: float = 0.0, y: float = 0.0):
         return super().__init__([x, y])
 
-    def __add__(self, other: "Vec2d") -> "Vec2d":
+    def __add__(self, other: "Vec2d") -> "Vec2d":  # type: ignore
         return Vec2d(*super().__add__(other)._data)
 
-    def __sub__(self, other: "Vec2d") -> "Vec2d":
+    def __sub__(self, other: "Vec2d") -> "Vec2d":  # type: ignore
         self._ensure_len_eq(other)
         return Vec2d(*super().__sub__(other)._data)
 
@@ -75,10 +75,10 @@ class Vec3d(Vector):
         else:
             self._normalized = [x / l, y / l, z / l]
 
-    def __add__(self, other: "Vec3d") -> "Vec3d":
+    def __add__(self, other: "Vec3d") -> "Vec3d":  # type: ignore
         return Vec3d(*super().__add__(other)._data)
 
-    def __sub__(self, other: "Vec3d") -> "Vec3d":
+    def __sub__(self, other: "Vec3d") -> "Vec3d":  # type: ignore
         self._ensure_len_eq(other)
         return Vec3d(*super().__sub__(other)._data)
 
@@ -149,7 +149,7 @@ class Rotation(Matrix):
     """
 
     @staticmethod
-    def identity() -> "Rotation":
+    def identity() -> "Rotation":  # type: ignore
         """Always returns a 3x3 identity rotation matrix."""
         return Rotation([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
 
@@ -210,7 +210,7 @@ class Rotation(Matrix):
     def __matmul__(self, other: "Rotation") -> "Rotation": ...
     @overload
     def __matmul__(self, other: Vec3d) -> Vec3d: ...
-    def __matmul__(self, other: "Rotation | Vec3d"):
+    def __matmul__(self, other: "Rotation | Vec3d"):  # type: ignore
         if isinstance(other, Rotation):
             return Rotation(super().__matmul__(other).to_list())
         else:
@@ -236,7 +236,7 @@ class Transform(Matrix):
     """
 
     @staticmethod
-    def identity():
+    def identity():  # type: ignore
         return Transform(Matrix.identity(4).to_list())
 
     @staticmethod
@@ -267,20 +267,8 @@ class Transform(Matrix):
             raise ValueError("Rotation matrix must be of size 4x4")
         super().__init__(data)
 
-    @overload
-    def __matmul__(self, other: "Transform") -> "Transform": ...
-    @overload
-    def __matmul__(self, other: Vec3d) -> Vec3d: ...
-    @overload
-    def __matmul__(self, other: "Frame") -> "Transform": ...
-    def __matmul__(self, other):
-        if isinstance(other, Transform):
-            return Transform(super().__matmul__(other)._data)
-        elif isinstance(other, Frame):
-            return self @ other._transform
-        else:
-            vec = super().__matmul__(Vector(other.to_list() + [1.0]))
-            return Vec3d(*vec.to_list()[:3])
+    def __matmul__(self, other: "Transform") -> "Transform":  # type: ignore
+        return Transform(super().__matmul__(other)._data)
 
     @property
     def rotation(self) -> Rotation:
@@ -301,11 +289,15 @@ class Transform(Matrix):
         for i in range(3):
             self._data[i][3] = translation[i]
 
-    def rotate(self, rotation: Rotation) -> "Transform":
-        return Transform.create(rotation=self.rotation @ rotation)
+    def apply_to_point(self, point: Vec3d):
+        v = super().__matmul__(Vector([point.x, point.y, point.z, 1.0]))
+        w = v[3]
+        if abs(w) < 1e-8:
+            raise ValueError("Invalid homogeneous point (w ≈ 0)")
+        return Vec3d(v[0] / w, v[1] / w, v[2] / w)
 
-    def translate(self, translation: Vec3d) -> "Transform":
-        return Transform.create(translation=(self @ translation))
+    def rotate(self, rotation: Rotation) -> "Transform":
+        return self @ rotation.to_transform()
 
     def inverse(self) -> "Transform":
         rot_inv = self.rotation.inverse()
@@ -395,7 +387,7 @@ class Frame:
         children.
         :param delta: The delta vector to move the frame by.
         """
-        self._transform = self._transform.translate(delta)
+        self._transform = self._transform @ Transform.create(translation=delta)
         self._set_dirty()
         return self
 
@@ -405,8 +397,12 @@ class Frame:
         positions, and origin remains the same.
         :param delta: The vector to move the frame origin by.
         """
-        self._transform = self._transform.rotate(rotation)
+        self._transform = self._transform @ rotation.to_transform()
         self._set_dirty()
+        return self
+
+    def apply_transform(self, t: Transform):
+        self._transform = t @ self._transform
         return self
 
     def rotate_about(self, reference: "Frame", rotation: Rotation) -> "Frame":
@@ -417,30 +413,33 @@ class Frame:
         return self
 
     def get_origin_in_world(self) -> Vec3d:
-        return self._get_transform_from_world().translation
+        return self._local_to_world_t().translation
 
     def get_origin_in_frame(self, target: "Frame") -> Vec3d:
-        pos = self.get_origin_in_world()
-        return target._get_transform_from_world().inverse() @ pos
+        p_world = self.get_origin_in_world()
+        return target._local_to_world_t().inverse().apply_to_point(p_world)
 
     def world_pos_to_local(self, world_pos: Vec3d) -> Vec3d:
-        return self._get_transform_from_world().inverse() @ world_pos
+        return self._local_to_world_t().inverse().apply_to_point(world_pos)
 
     def local_pos_to_world(self, local_pos: Vec3d) -> Vec3d:
-        return self._get_transform_from_world() @ local_pos
+        return self._local_to_world_t().apply_to_point(local_pos)
 
     def local_pos_to_frame(self, target: "Frame", local_pos: Vec3d):
         pos = self.local_pos_to_world(local_pos)
-        return target._get_transform_from_world().inverse() @ pos
+        return target._local_to_world_t().inverse().apply_to_point(pos)
 
     def copy(self):
         return Frame(self.origin, self.rotation)
 
-    def _get_transform_from_world(self) -> Transform:
+    def as_transform(self):
+        return self._transform
+
+    def _local_to_world_t(self) -> Transform:
         transform: Transform
         if not self._global_transform:
             if self.parent:
-                transform = self.parent._get_transform_from_world() @ self._transform
+                transform = self.parent._local_to_world_t() @ self._transform
             else:
                 transform = self._transform
             return transform

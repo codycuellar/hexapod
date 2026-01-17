@@ -97,7 +97,7 @@ class Matrix:
     def __matmul__(self, other: "Matrix") -> "Matrix": ...
     @overload
     def __matmul__(self, other: Vector) -> Vector: ...
-    def __matmul__(self, other):
+    def __matmul__(self, other: "Matrix | Vector"):
         if isinstance(other, Matrix):
             if self.N != other.N:
                 raise ValueError("Matrix sizes do not match for multiplication.")
