@@ -47,9 +47,9 @@ class Body:
         return leg.foot_frame.get_origin_in_frame(self.frame)
 
     def get_command_message(self):
-        angle_strs = []
+        angle_strs: list[str] = []
         for leg in self.legs.values():
-            servos = []
+            servos: list[str] = []
             servos.append(leg.coxa_control.get_command_message())
             servos.append(leg.femur_control.get_command_message())
             servos.append(leg.tibia_control.get_command_message())
@@ -137,8 +137,28 @@ class Leg:
 
     def _calculate_ik(self, position: Vec3d) -> list[float]:
         """
-        Calculates the angles from the leg hip joint to the tip point in 3d space,
-        with x axis being parallel to the ground plane, perpindicular to the mount point.
+        Calculates the raw angles from a base 'home' position. Home is considered
+        every joint frame lying on the positive x axis of the mount frame, with all
+        x axes parallel. This is angle of 0 for each joint. positive angles rotate
+        the children downward (in z space) about the y axis, and negative angles
+        rotate upward (in z space) from this starting home position. The coxa
+        rotation angle positve rotates away (in y space) about the z axis, and
+        negative rotates towards.
+
+        | z-axis
+        |
+        | / y-axis
+        |/
+        o------- x-axis
+
+        cox------->fem------->tib------->foot
+
+        Args:
+            position: The position relative to the coxa frame. This MUST be converted
+                from the originating relative frame to this leg's coxa frame.
+
+        Returns:
+            The raw angles of each frame.
         """
         cox_len = self.coxa_length
         fem_len = self.femur_length

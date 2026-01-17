@@ -25,7 +25,7 @@ class GaitState(Enum):
 
 @dataclass
 class GaitGeometry:
-    step_height = 65.0  # mm
+    step_height = 45.0  # mm
     safe_radius = 35.0  # mm
     max_radius = 65.0  # mm
     safe_angle = 10  # degrees
@@ -34,9 +34,9 @@ class GaitGeometry:
 
 @dataclass
 class GaitMotion:
-    max_velocity = 275.0  # mm/s
-    max_rot_velocity = 65  # degrees / second
-    swing_velocity_scale = 1.45  # factor of max velocity
+    max_velocity = 225.0  # mm/s
+    max_rot_velocity = 35  # degrees / second
+    swing_velocity_scale = 1.65  # factor of max velocity
     min_swing_velocity_factor = 0.4  # factor of max velocity
 
     max_swing_velocity = max_velocity * swing_velocity_scale
@@ -343,7 +343,8 @@ class TripodGait:
         t = (step_radius - self.geometry.safe_radius) / (
             self.geometry.max_radius - self.geometry.safe_radius
         )
-        ease = (1 - min(max(t, 0.0), 1.0)) ** 2
+        t = min(max(t, 0.0), 1.0)
+        ease = 1.0 - (t * t * (3 - 2 * t))  # smoothstep inverted
         return delta_vector * ease
 
     def _get_rotation_group_angle(self, group: Frame):
