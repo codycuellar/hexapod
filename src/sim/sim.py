@@ -7,15 +7,20 @@ Hardcoded hexapod creation for simulation - no config needed.
 import time
 from typing import cast
 
-import serial
+import logging
+
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
 
 from hexapod.gamepad import GamePad
-from hexapod.rigid_body import Body, Leg, LegID
+from hexapod.rigid_body import Body, Leg, LegID, LegConfig
 from hexapod.engine import Frame, Vec3d, Vec2d, Rotation, Transform
-from hexapod.servos import MockServo, Servo
+from hexapod.servos import Servo
 from hexapod.motion_planner import MotionPlanner
+
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 def create_simulation_hexapod() -> Body:
@@ -24,85 +29,61 @@ def create_simulation_hexapod() -> Body:
     No config needed - just builds the frame hierarchy directly.
     """
     # Joint lengths (mm)
-    COXA_LEN = 40.0
-    FEMUR_LEN = 65.0
-    TIBIA_LEN = 90.0
+    COX_LEN = 40.0
+    FEM_LEN = 65.0
+    TIB_LEN = 90.0
 
     origin_frame = Frame()
     distance = Vec3d(100, 0, 0)
 
+    ids = [LegID.RM, LegID.RF, LegID.LF, LegID.LM, LegID.LB, LegID.RB]
+    servos = {
+        LegID.RM: (
+            Servo(6, -7.0, inverted=True),
+            Servo(7, -30.0, inverted=False),
+            Servo(8, 65.0, inverted=True),
+        ),
+        LegID.RF: (
+            Servo(3, -6.0, inverted=True),
+            Servo(4, -30.0, inverted=False),
+            Servo(5, 67.0, inverted=True),
+        ),
+        LegID.LF: (
+            Servo(0, 2.0, inverted=True),
+            Servo(1, 24.0, inverted=True),
+            Servo(2, -80.0, inverted=False),
+        ),
+        LegID.LM: (
+            Servo(15, -4.0, inverted=True),
+            Servo(16, 27.0, inverted=True),
+            Servo(17, -85.0, inverted=False),
+        ),
+        LegID.LB: (
+            Servo(12, -4.0, inverted=True),
+            Servo(13, 31.0, inverted=True),
+            Servo(14, -77.0, inverted=False),
+        ),
+        LegID.RB: (
+            Servo(9, 0.0, inverted=True),
+            Servo(10, -26.0, inverted=False),
+            Servo(11, 73.0, inverted=True),
+        ),
+    }
+
+    legs: dict[LegID, Leg] = {}
+    frames: dict[LegID, Frame] = {}
+
     # get the position in the frame's local coordinates to the global coordinates,
     # and rotate the frame 60 degrees for each leg
-    ids = [LegID.RM, LegID.RF, LegID.LF, LegID.LM, LegID.LB, LegID.RB]
-    leg_setup = [COXA_LEN, FEMUR_LEN, TIBIA_LEN, MockServo(), MockServo(), MockServo()]
-
-    legs = {}
-
     for id in ids:
         mount_pos = origin_frame.local_pos_to_world(distance)
         frame = Frame(origin=mount_pos, rotation=origin_frame.rotation)
-        legs[id] = Leg(id, frame, *leg_setup)
         origin_frame.rotate(Rotation.degrees(0.0, 0.0, 60.0))
-    legs[LegID.RF] = Leg(
-        LegID.RF,
-        legs[LegID.RF].frame,
-        COXA_LEN,
-        FEMUR_LEN,
-        TIBIA_LEN,
-        Servo(3, -6.0, inverted=True),
-        Servo(4, -30.0, inverted=False),
-        Servo(5, 67.0, inverted=True),
-    )
-    legs[LegID.RM] = Leg(
-        LegID.RM,
-        legs[LegID.RM].frame,
-        COXA_LEN,
-        FEMUR_LEN,
-        TIBIA_LEN,
-        Servo(6, -7.0, inverted=True),
-        Servo(7, -30.0, inverted=False),
-        Servo(8, 65.0, inverted=True),
-    )
-    legs[LegID.RB] = Leg(
-        LegID.RB,
-        legs[LegID.RB].frame,
-        COXA_LEN,
-        FEMUR_LEN,
-        TIBIA_LEN,
-        Servo(9, 0.0, inverted=True),
-        Servo(10, -26.0, inverted=False),
-        Servo(11, 73.0, inverted=True),
-    )
-    legs[LegID.LF] = Leg(
-        LegID.LF,
-        legs[LegID.LF].frame,
-        COXA_LEN,
-        FEMUR_LEN,
-        TIBIA_LEN,
-        Servo(0, 2.0, inverted=True),
-        Servo(1, 24.0, inverted=True),
-        Servo(2, -80.0, inverted=False),
-    )
-    legs[LegID.LM] = Leg(
-        LegID.LM,
-        legs[LegID.LM].frame,
-        COXA_LEN,
-        FEMUR_LEN,
-        TIBIA_LEN,
-        Servo(15, -4.0, inverted=True),
-        Servo(16, 27.0, inverted=True),
-        Servo(17, -85.0, inverted=False),
-    )
-    legs[LegID.LB] = Leg(
-        LegID.LB,
-        legs[LegID.LB].frame,
-        COXA_LEN,
-        FEMUR_LEN,
-        TIBIA_LEN,
-        Servo(12, -4.0, inverted=True),
-        Servo(13, 31.0, inverted=True),
-        Servo(14, -77.0, inverted=False),
-    )
+        cox, fem, tib = servos[id]
+        config = LegConfig(
+            coxa=(COX_LEN, cox), femur=(FEM_LEN, fem), tibia=(TIB_LEN, tib)
+        )
+        legs[id] = Leg(id, frame, config)
 
     return Body(Frame(), legs)
 
@@ -183,16 +164,16 @@ def update_ground_grid_accumulated(lines: list, ground_frame: Transform):
 
 
 def main():
-    comport = serial.Serial("COM3", 115200)
-    comport.reset_input_buffer()
-
-    print("Creating hexapod...")
+    """
+    Visualization main loop.
+    """
+    logger.info("Creating hexapod for visualization...")
     body = create_simulation_hexapod()
 
     gamepad = GamePad()
     gamepad.start_reading()
 
-    print("Creating path planner...")
+    logger.info("Creating motion planner for visualization...")
     motion_planner = MotionPlanner(body, Vec3d(140, 0, -80))
     motion_planner.initialize()
 
@@ -217,79 +198,74 @@ def main():
     grid_lines = create_ground_grid(ax)
     ground_frame = Frame()
 
-    DT = 1 / 20  # simulating can't go much faster
+    DT = 1 / 15  # simulating can't go much faster
 
     next_time = time.perf_counter()
 
+    logger.info("Starting visualization loop...")
+
+
     running = True
 
-    while running:
-        gait_vec = Vec2d()
-        gait_turn = 0.0
+    try:
+        while running:
+            gait_vec = Vec2d()
+            gait_turn = 0.0
 
-        body_translation_cmd = Vec3d()
-        body_rotation_cmd = Vec3d()  # pitch, roll, yaw
+            body_translation_cmd = Vec3d()
+            body_rotation_cmd = Vec3d()  # pitch, roll, yaw
 
-        # LEFT STICK
-        if gamepad.bumper_l:
-            body_translation_cmd = gamepad.joy_l.to_3d()
-        else:
-            gait_vec = gamepad.joy_l
+            # LEFT STICK
+            if gamepad.bumper_l:
+                body_translation_cmd = gamepad.joy_l.to_3d()
+            else:
+                gait_vec = gamepad.joy_l
 
-        # right stick
-        if gamepad.bumper_l:
-            body_translation_cmd = Vec3d(
-                body_translation_cmd.x, body_translation_cmd.y, gamepad.joy_r.y
-            )
-        else:
-            body_rotation_cmd = Vec3d(
-                -gamepad.joy_r.y, gamepad.joy_r.x, body_rotation_cmd.z
-            )
+            # RIGHT STICK
+            if gamepad.bumper_l:
+                body_translation_cmd = Vec3d(
+                    body_translation_cmd.x, body_translation_cmd.y, gamepad.joy_r.y
+                )
+            else:
+                body_rotation_cmd = Vec3d(
+                    -gamepad.joy_r.y, gamepad.joy_r.x, body_rotation_cmd.z
+                )
 
-        # TRIGGERS
-        trigger_turn = gamepad.trigger_l - gamepad.trigger_r
-        if gamepad.bumper_r:
-            body_rotation_cmd = Vec3d(
-                body_rotation_cmd.x, body_rotation_cmd.y, trigger_turn
-            )
-        else:
-            gait_turn = trigger_turn
+            # TRIGGERS
+            trigger_turn = gamepad.trigger_l - gamepad.trigger_r
+            if gamepad.bumper_r:
+                body_rotation_cmd = Vec3d(
+                    body_rotation_cmd.x, body_rotation_cmd.y, trigger_turn
+                )
+            else:
+                gait_turn = trigger_turn
 
-        motion_planner.update_gait(
-            DT,
-            gait_vec,
-            gait_turn,
-        )
+            # Update motion planner with gamepad inputs
+            motion_planner.update_gait(DT, gait_vec, gait_turn)
+            motion_planner.offset_body(DT, body_translation_cmd, body_rotation_cmd)
+            motion_planner.step(DT)
 
-        motion_planner.offset_body(
-            DT,
-            body_translation_cmd,
-            body_rotation_cmd,
-        )
+            ground_frame.apply_transform(motion_planner.ground_transform)
 
-        motion_planner.step(DT)
+            # Draw ground grid using the accumulated frame
+            update_ground_grid_accumulated(grid_lines, ground_frame.as_transform())
+            draw_hexapod(ax, body, leg_lines, body_line)
 
-        ground_frame = motion_planner.ground_transform @ ground_frame
+            fig.canvas.draw()
+            plt.pause(0.001)  # GUI event pump only
 
-        # draw ground grid using the accumulated frame
-        update_ground_grid_accumulated(grid_lines, ground_frame)
-        draw_hexapod(ax, body, leg_lines, body_line)
+            next_time += DT
+            sleep_time = next_time - time.perf_counter()
 
-        msg = body.get_command_message()
-        # print(msg)
-        comport.write((msg + "\n").encode("utf-8"))
-        if comport.in_waiting > 0:
-            response = comport.readline().decode("utf-8").strip()
-            print(f"Pico says: {response}")
+            if sleep_time > 0:
+                time.sleep(sleep_time)
 
-        fig.canvas.draw()
-        plt.pause(0.001)  # <-- GUI event pump only
+            # Check if window is still open
+            if not plt.get_fignums():
+                running = False
 
-        next_time += DT
-        sleep_time = next_time - time.perf_counter()
-
-        if sleep_time > 0:
-            time.sleep(sleep_time)
+    except KeyboardInterrupt:
+        logger.info("Visualization interrupted by user")
 
 
 if __name__ == "__main__":

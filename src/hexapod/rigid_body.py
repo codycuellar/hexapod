@@ -1,8 +1,12 @@
 import math
+import logging
+from dataclasses import dataclass
 
 from hexapod.servos import JointControl
 from hexapod.engine import Frame, Vec3d, Vec2d, Rotation
 from enum import Enum
+
+logger = logging.getLogger()
 
 
 class LegID(Enum):
@@ -60,53 +64,37 @@ class Body:
         return ",".join(angle_strs)
 
 
+@dataclass
+class LegConfig:
+    coxa: tuple[float, JointControl]
+    femur: tuple[float, JointControl]
+    tibia: tuple[float, JointControl]
+
+
 class Leg:
     def __init__(
         self,
         leg_id: LegID,
         mount_frame: Frame,
-        coxa_length: float,
-        femur_length: float,
-        tibia_length: float,
-        coxa_control: JointControl,
-        femur_control: JointControl,
-        tibia_control: JointControl,
+        config: LegConfig,
     ):
-        """
-        Docstring for __init__
-        :param leg_id: The ID for the leg.
-        :param mount_frame: The coordinate frame of the coxa mount point.
-        :param standing_foot_pos:
-            The coxa-frame relative position of the foot for neutral standing
-            position.
-        :param coxa_length: Description
-        :param femur_length: Description
-        :param tibia_length: Description
-        :param coxa_control: Description
-        :param femur_control: Description
-        :param tibia_control: Description
-        """
         self.id = leg_id
         self.name = leg_id
         self.frame = mount_frame
 
-        self.coxa_length = coxa_length
-        self.femur_length = femur_length
-        self.tibia_length = tibia_length
-
-        self.coxa_control = coxa_control
-        self.femur_control = femur_control
-        self.tibia_control = tibia_control
+        self.coxa_length, self.coxa_control = config.coxa
+        self.femur_length, self.femur_control = config.femur
+        self.tibia_length, self.tibia_control = config.tibia
 
         self.coxa_frame = Frame(parent=self.frame)
         self.femur_frame = Frame(
-            origin=Vec3d(coxa_length, 0, 0), parent=self.coxa_frame
+            origin=Vec3d(self.coxa_length, 0, 0), parent=self.coxa_frame
         )
         self.tibia_frame = Frame(
-            origin=Vec3d(femur_length, 0, 0), parent=self.femur_frame
+            origin=Vec3d(self.femur_length, 0, 0), parent=self.femur_frame
         )
         self.foot_frame = Frame(
-            origin=Vec3d(tibia_length, 0, 0), parent=self.tibia_frame
+            origin=Vec3d(self.tibia_length, 0, 0), parent=self.tibia_frame
         )
 
     def set_foot_pos(self, position: Vec3d):
@@ -187,7 +175,7 @@ class Leg:
                     0, Vec2d(new_position.x, new_position.y).length() - cox_len
                 )
                 zH = Vec2d(new_position.z, xy_len).length()
-                print(
+                logger.warning(
                     f"Leg {self.id} maximum reach attempted! Clamping {position} to {new_position}"
                 )
                 position = new_position
