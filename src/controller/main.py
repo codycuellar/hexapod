@@ -29,8 +29,6 @@ def main():
                         continue
                     pin, angle = angle_raw.split(":")
                     cluster.value(int(pin), float(angle))
-
-                # print("servos updated")
             except Exception as e:
                 # Log to serial so you see it on your PC immediately
                 print("RUNTIME_ERROR:", e)

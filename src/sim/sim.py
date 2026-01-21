@@ -204,7 +204,6 @@ def main():
 
     logger.info("Starting visualization loop...")
 
-
     running = True
 
     try:

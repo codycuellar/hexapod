@@ -9,6 +9,7 @@ import time
 import logging
 import serial
 import signal
+from types import FrameType
 
 from hexapod.gamepad import GamePad
 from hexapod.rigid_body import Body, Leg, LegID, LegConfig
@@ -72,7 +73,6 @@ def create_hexapod() -> Body:
     }
 
     legs: dict[LegID, Leg] = {}
-    frames: dict[LegID, Frame] = {}
 
     # Position each leg 60 degrees apart around the origin
     for id in ids:
@@ -125,7 +125,7 @@ def main():
     # Setup signal handlers for graceful shutdown
     running = True
 
-    def signal_handler(sig, frame):
+    def signal_handler(sig: int, frame: "FrameType | None"):
         nonlocal running
         logger.info("Received shutdown signal, stopping...")
         running = False
@@ -154,11 +154,12 @@ def main():
             comport.reset_input_buffer()
             logger.info("Serial port opened successfully")
         except (serial.SerialException, OSError) as e:
-            logger.warning(f"Failed to open serial port: {e}")
-            logger.warning("Continuing without hardware control (simulation mode)")
+            logger.warning(f"Failed to open serial port: {e} - shutting down")
             comport = None
+            running = False
     else:
-        logger.warning("No serial port found. Continuing without hardware control (simulation mode)")
+        logger.warning("No serial port found. Shutting down")
+        running = False
 
     DT = 1 / 50  # Control loop frequency: 50 Hz
     next_time = time.perf_counter()
@@ -211,7 +212,10 @@ def main():
                     # Optional: read response from Servo2040
                     if comport.in_waiting > 0:
                         response = comport.readline().decode("utf-8").strip()
-                        if response.startswith("RUNTIME_ERROR:") or response.startswith("FATAL_ERROR:"):
+                        print(f"Pico says: {response}")
+                        if response.startswith("RUNTIME_ERROR:") or response.startswith(
+                            "FATAL_ERROR:"
+                        ):
                             logger.error(f"Servo2040 error: {response}")
                 except (serial.SerialException, OSError) as e:
                     logger.error(f"Serial communication error: {e}")
@@ -230,10 +234,8 @@ def main():
         logger.info("Shutting down...")
         if comport:
             comport.close()
-        gamepad.stop_reading()
         logger.info("Shutdown complete")
 
 
 if __name__ == "__main__":
     main()
-
