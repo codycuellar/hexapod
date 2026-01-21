@@ -1,0 +1,26 @@
+[Unit]
+Description=Hexapod Robot Control Service
+After=network-online.target dev-ttyACM0.device
+Wants=network-online.target
+Documentation=https://github.com/codycuellar/hexapod
+
+[Service]
+Type=simple
+WorkingDirectory=%HOME%/hexapod
+Environment="PATH=%HOME%/hexapod/venv/bin:%HOME%/.local/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=%HOME%/hexapod/venv/bin/hexapod
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Allow service to access serial ports
+SupplementaryGroups=dialout
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target
+
