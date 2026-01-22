@@ -88,7 +88,7 @@ def create_hexapod() -> Body:
     return Body(Frame(), legs)
 
 
-def find_serial_port():
+def find_serial_port() -> serial.Serial | None:
     """
     Attempt to find the Servo2040 serial port.
     On Windows: typically COM3, COM4, etc.
@@ -96,27 +96,44 @@ def find_serial_port():
     """
     import platform
 
+    timeout = 120
+
+    start_time = time.time()
     system = platform.system()
+    ports: list[str] = []
+
     if system == "Windows":
         # Try common COM ports
         for port_num in range(3, 10):
-            port = f"COM{port_num}"
-            try:
-                test_serial = serial.Serial(port, 115200, timeout=0.1)
-                test_serial.close()
-                return port
-            except (serial.SerialException, OSError):
-                continue
+            ports.append(f"COM{port_num}")
     elif system == "Linux":
         # Try common Linux serial devices
-        for device in ["/dev/ttyACM0", "/dev/ttyUSB0", "/dev/ttyUSB1"]:
+        ports = [
+            "/dev/serial/by-id/NEEDS_ID_NAME",
+            "/dev/ttyACM0",
+            "/dev/ttyUSB0",
+            "/dev/ttyUSB1",
+        ]
+
+    while time.time() - start_time < timeout:
+        for port in ports:
             try:
-                test_serial = serial.Serial(device, 115200, timeout=0.1)
-                test_serial.close()
-                return device
+                logging.info("Attempting to connect to device %s", port)
+                sconn = serial.Serial(port, 115200, timeout=0.1)
+                sconn.write(b"PING\n")
+                sconn.flush()
+                time.sleep(1)
+                if sconn.in_waiting:
+                    response = sconn.readline().decode("utf-8").strip()
+                    logger.info("response from comm is %s", response)
+                    if response == "PONG":
+                        return sconn
+                sconn.close()
             except (serial.SerialException, OSError):
+                time.sleep(1)
                 continue
 
+    logging.error("Could not find servo controller board after %s seconds", start_time)
     return None
 
 
@@ -125,41 +142,19 @@ def main():
     # Setup signal handlers for graceful shutdown
     running = True
 
-    def signal_handler(sig: int, frame: "FrameType | None"):
-        nonlocal running
-        logger.info("Received shutdown signal, stopping...")
-        running = False
-
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
-    logger.info("Creating hexapod...")
+    logger.info("Creating hexapod geometry...")
     body = create_hexapod()
-
-    logger.info("Initializing gamepad...")
-    gamepad = GamePad()
-    gamepad.start_reading()
 
     logger.info("Creating motion planner...")
     motion_planner = MotionPlanner(body, Vec3d(140, 0, -80))
     motion_planner.initialize()
 
+    logger.info("Initializing gamepad...")
+    gamepad = GamePad()
+    gamepad.start_reading()
+
     # Setup serial communication with Servo2040
-    serial_port = find_serial_port()
-    comport = None
-    if serial_port:
-        try:
-            logger.info(f"Opening serial port: {serial_port}")
-            comport = serial.Serial(serial_port, 115200, timeout=0.1)
-            comport.reset_input_buffer()
-            logger.info("Serial port opened successfully")
-        except (serial.SerialException, OSError) as e:
-            logger.warning(f"Failed to open serial port: {e} - shutting down")
-            comport = None
-            running = False
-    else:
-        logger.warning("No serial port found. Shutting down")
-        running = False
+    comport = find_serial_port()
 
     DT = 1 / 50  # Control loop frequency: 50 Hz
     next_time = time.perf_counter()
@@ -171,48 +166,47 @@ def main():
             gait_vec = Vec2d()
             gait_turn = 0.0
 
-            body_translation_cmd = Vec3d()
-            body_rotation_cmd = Vec3d()  # pitch, roll, yaw
+            body_offset_trans = Vec3d()
+            body_offset_rot = Vec3d()  # pitch, roll, yaw
 
             # LEFT STICK
             if gamepad.bumper_l:
-                body_translation_cmd = gamepad.joy_l.to_3d()
+                body_offset_trans = gamepad.joy_l.to_3d()
             else:
                 gait_vec = gamepad.joy_l
 
             # RIGHT STICK
             if gamepad.bumper_l:
-                body_translation_cmd = Vec3d(
-                    body_translation_cmd.x, body_translation_cmd.y, gamepad.joy_r.y
+                body_offset_trans = Vec3d(
+                    body_offset_trans.x, body_offset_trans.y, gamepad.joy_r.y
                 )
             else:
-                body_rotation_cmd = Vec3d(
-                    -gamepad.joy_r.y, gamepad.joy_r.x, body_rotation_cmd.z
+                body_offset_rot = Vec3d(
+                    -gamepad.joy_r.y, gamepad.joy_r.x, body_offset_rot.z
                 )
 
             # TRIGGERS
             trigger_turn = gamepad.trigger_l - gamepad.trigger_r
             if gamepad.bumper_r:
-                body_rotation_cmd = Vec3d(
-                    body_rotation_cmd.x, body_rotation_cmd.y, trigger_turn
+                body_offset_rot = Vec3d(
+                    body_offset_rot.x, body_offset_rot.y, trigger_turn
                 )
             else:
                 gait_turn = trigger_turn
 
             # Update motion planner
             motion_planner.update_gait(DT, gait_vec, gait_turn)
-            motion_planner.offset_body(DT, body_translation_cmd, body_rotation_cmd)
+            motion_planner.offset_body(DT, body_offset_trans, body_offset_rot)
             motion_planner.step(DT)
 
             # Send servo commands to hardware
             if comport:
-                msg = body.get_command_message()
                 try:
+                    msg = body.get_command_message()
                     comport.write((msg + "\n").encode("utf-8"))
-                    # Optional: read response from Servo2040
+
                     if comport.in_waiting > 0:
                         response = comport.readline().decode("utf-8").strip()
-                        print(f"Pico says: {response}")
                         if response.startswith("RUNTIME_ERROR:") or response.startswith(
                             "FATAL_ERROR:"
                         ):
