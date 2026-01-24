@@ -2,9 +2,27 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Deploy and Run Hexapod",
+            "label": "Pico: Deploy Files",
             "type": "shell",
-            "command": "mpremote fs cp src/controller/*.py : && mpremote fs cp src/hexapod/common/*.py : && mpremote soft-reset && python -m hexapod.main",
+            "command": "mpremote fs cp src/controller/main.py : && mpremote fs cp src/controller/command_processor.py : && mpremote fs cp src/controller/led_manager.py : && mpremote fs cp src/controller/utils.py : && mpremote fs cp src/hexapod/common/commands.py : && mpremote fs cp src/hexapod/common/serial_buffer.py :",
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Pico: Deploy",
+            "dependsOn": "Pico: Deploy Files",
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Hexapod: Deploy and Run",
+            "dependsOn": "Pico: Deploy Files",
+            "type": "shell",
+            "command": "mpremote reset && python -m hexapod.main",
             "group": {
                 "kind": "build",
                 "isDefault": true
@@ -16,9 +34,37 @@
             "problemMatcher": []
         },
         {
-            "label": "Pico Soft-Reset",
+            "label": "Pico: Soft-Reset",
             "type": "shell",
             "command": "mpremote soft-reset",
+            "problemMatcher": []
+        },
+        {
+            "label": "Pico: Hard-Reset",
+            "type": "shell",
+            "command": "mpremote reset",
+            "problemMatcher": []
+        },
+        {
+            "label": "Pico: List Files",
+            "type": "shell",
+            "command": "mpremote ls",
+            "group": "test",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Pico: View Log",
+            "type": "shell",
+            "command": "mpremote cat :log.txt",
+            "group": "test",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
             "problemMatcher": []
         }
     ]

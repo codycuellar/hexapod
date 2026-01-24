@@ -1,20 +1,27 @@
 HIGH_MASK = 0x80
 LOW_MASK = 0x7F
-ACK = 0x06
-NACK = 0x21
+
+# Command high/low is flipped from standard usage since we operate over stdin,
+# We cannot use the low bits as raw data, or we risk seinding keyboard interrupts
+# to the REPL and crash our program. We intentionally use safe bits for commands
+# and then use the upper range for raw data.
 
 # INPUT COMMANDS (Pi → Servo2040)
-CMD_SET_SERVO = 0x80  # Set raw servo angles
-CMD_SET_LED = 0x83  # Set LED(s)
-CMD_SET_RELAY = 0x86  # Enable/disable relay
+CMD_SET_SERVO = 0x30  # Set raw servo angles
+CMD_SET_LED = 0x33  # Set LED(s)
+CMD_SET_RELAY = 0x36  # Enable/disable relay
 
-CMD_GET_STATUS = 0xA0  # Request status (Servo responds with CMD_STATUS)
+CMD_GET_STATUS = 0x41  # Request status
 
 # OUTPUT COMMANDS (Servo2040 → Pi)
-CMD_RESPONSE = 0xC0  # ACK/NACK to SET commands
-CMD_STATUS = 0xC3  # Status packet (voltage, current, flags)
-CMD_MESSAGE = 0xC6  # Arbitrary log or warning messages
+CMD_RESPONSE = 0x50  # ACK/NACK to SET commands
+CMD_STATUS = 0x51  # Status packet
+CMD_MESSAGE = 0x52  # Arbitrary log or warning messages
 
 # TWO-WAY
-CMD_PING = 0xF0  # Pi → Servo2040
-CMD_PONG = 0xF1  # Servo2040 → Pi
+CMD_PING = 0x50  # Pi → Servo2040
+CMD_PONG = 0x4F  # Servo2040 → Pi (Pong)
+
+# Response codes (safe ASCII)
+ACK = 0x90  # Acknowledge
+NACK = 0x91  # Not Acknowledge

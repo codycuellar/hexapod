@@ -6,15 +6,15 @@
       "settings": {
         "python.analysis.typeshedPaths": [
           "~/.micropico-stubs/included",
-          "${workspaceFolder}/typings"
+          "${workspaceFolder}/../../typings"
         ],
         "python.analysis.extraPaths": [
-          "~/.micropico-stubs/included"
+          "~/.micropico-stubs/included",
+          "../hexapod/common"
         ],
         "editor.formatOnSave": true,
-        "micropico.openOnStart": true,
-        "micropico.autoConnect": true,
-        "micropico.syncFolder": "."
+        "micropico.syncFolder": ".",
+        "micropico.syncFileTypes": ["py"]
       }
     },
     {
@@ -46,9 +46,9 @@
     },
     "python.terminal.activateEnvironment": false,
     "editor.defaultFormatter": "ms-python.black-formatter",
-    "micropico.syncFileTypes": [
-      "py"
-    ]
+    "micropico.openOnStart": true,
+    "micropico.autoConnect": false,
+    "micropico.softResetAfterUpload": true
   }
 }
 

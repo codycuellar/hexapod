@@ -8,7 +8,8 @@
   ],
   "stubPath": "../../typings",
   "extraPaths": [
-    "~/.micropico-stubs/included"
+    "~/.micropico-stubs/included",
+    "../hexapod/common"
   ],
   "pythonVersion": "3.5",
   "reportMissingImports": true,

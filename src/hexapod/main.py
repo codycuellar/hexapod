@@ -8,11 +8,10 @@ It handles gamepad input, motion planning, and serial communication with the Ser
 import time
 import logging
 import serial
-import signal
 import platform
 
 from hexapod.common.commands import CMD_SET_SERVO, CMD_PING, CMD_PONG, CMD_MESSAGE
-# from hexapod.common.serial_buffer import SerialBuffer
+from hexapod.common.serial_buffer import SerialBuffer, SerialPacket
 from hexapod.gamepad import GamePad
 from hexapod.rigid_body import Body, Leg, LegID, LegConfig
 from hexapod.engine import Frame, Vec3d, Vec2d, Rotation
@@ -22,76 +21,80 @@ from hexapod.motion_planner import MotionPlanner
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 
 
 class HexapodSerial:
-    def __init__(self, ports=None, timeout=5):
+    def __init__(self, ports: list[str] | None = None, timeout: int = 5):
         self.ports = ports or self._default_ports()
         self.timeout = timeout
         self.conn = None
+        self.serial_buffer = None
         self.last_error = None
-
-    def _default_ports(self):
-        system = platform.system()
-        if system == "Windows":
-            return [f"COM{i}" for i in range(3, 15)]
-        else:
-            return ["/dev/ttyACM0", "/dev/ttyUSB0", "/dev/ttyUSB1"]
+        self.text_buffer = ""  # Accumulate text across multiple reads for tracebacks
 
     def connect(self):
-        """Attempts to find and connect to the hexapod board."""
+        """Attempts to find and connect to the hexapod servo2040 board."""
         start_time = time.time()
         while time.time() - start_time < self.timeout:
             for port in self.ports:
                 try:
                     logger.info(f"Scanning {port}...")
-                    s = serial.Serial(port, 115200, timeout=0.5)
+                    self.conn = serial.Serial(port, 115200, timeout=0.5)
+                    self.serial_buffer = SerialBuffer()
+                    self.text_buffer = ""  # Reset text buffer on new connection
 
-                    # 1. Listen for a moment to see if it's already talking (traceback or READY)
+                    # 1. Look for immediate irrecoverable crash
                     time.sleep(0.5)
-                    if s.in_waiting:
-                        data = s.read(s.in_waiting).decode("utf-8", errors="replace")
-                        if "Traceback" in data or "--- HEXAPOD_CRASH ---" in data:
-                            logger.error(f"CRITICAL: Found traceback on {port}:\n{data}")
-                            s.close()
-                            continue
-                        if "--- HEXAPOD_READY ---" in data:
-                            logger.info(f"Found ready board on {port}")
-                            self.conn = s
-                            return True
+                    packets, text = self._read_available()
+                    if "Traceback" in text or "--- HEXAPOD_CRASH ---" in text:
+                        logger.error(
+                            f"CRITICAL: Device {port} crashed and likely cannot recover without software"
+                            + " changes. Traceback:\n{text}"
+                        )
+                        self.close()
+                        continue
 
-                    # 2. Try to PING
+                    # we will ping/pong for ready state
                     logger.debug(f"Sending PING to {port}")
-                    s.write(bytes([CMD_PING, 0x00]))
-                    s.flush()
+                    # PING with zero length (encoded as high bit)
+                    self.conn.write(bytes([CMD_PING, 0x80]))  # Length 0 encoded as 0x80
+                    self.conn.flush()
 
                     time.sleep(0.2)
-                    if s.in_waiting:
-                        response = s.read(s.in_waiting)
-                        # Protocol check: [CMD_PONG, 0x00]
-                        if len(response) >= 2 and response[0] == CMD_PONG:
-                            logger.info(f"Connected to Hexapod on {port}")
-                            self.conn = s
+                    packets, _ = self._read_available()
+                    for packet in packets:
+                        if packet.cmd == CMD_PONG:
+                            logger.info(
+                                f"Received PONG, successfully conntected to {port}"
+                            )
                             return True
 
-                    s.close()
+                    self.close()
                 except (serial.SerialException, OSError) as e:
                     if "Access is denied" in str(e):
-                        logger.warning(f"Port {port} is busy (is another program like Thonny or MicroPico open?)")
+                        logger.warning(
+                            f"Port {port} is busy (is another program like Thonny or MicroPico open?)"
+                        )
+                    self.close()
                     continue
             time.sleep(1)
         return False
 
-    def send_servos(self, servo_data):
+    def send_servos(self, servo_data: bytearray):
         if not self.conn:
             return False
         try:
-            # Protocol: [CMD, LEN, DATA...]
-            buff = bytearray([CMD_SET_SERVO, len(servo_data)])
-            buff.extend(servo_data)
+            # Protocol: [CMD (ASCII), LEN (high bit), DATA... (high bit encoded)]
+            # Encode length and data with high bits to avoid control chars
+            buff = bytearray([CMD_SET_SERVO])
+            # Encode length: 0x80 + length
+            buff.append(0x80 | (len(servo_data) & 0x7F))
+            # Encode data bytes: 0x80 + byte
+            for byte in servo_data:
+                buff.append(0x80 | (byte & 0x7F))
             self.conn.write(buff)
             self.conn.flush()
             return True
@@ -102,34 +105,36 @@ class HexapodSerial:
 
     def check_messages(self):
         """Checks for incoming messages or errors from the board."""
-        if not self.conn or self.conn.in_waiting == 0:
-            return
+        packets, text = self._read_available()
 
-        try:
-            # This is a simple read - in a full implementation we'd use SerialBuffer
-            data = self.conn.read(self.conn.in_waiting)
+        # Process binary packets
+        for packet in packets:
+            if packet.cmd == CMD_MESSAGE:
+                msg = packet.data.decode("utf-8", errors="replace")
+                logger.info(f"PICO: {msg}")
+            else:
+                logger.debug(f"PICO BINARY CMD: {packet.cmd:#02x}")
 
-            # Check for binary protocol messages
-            i = 0
-            while i < len(data):
-                cmd = data[i]
-                if cmd == CMD_MESSAGE and i + 1 < len(data):
-                    length = data[i+1]
-                    msg = data[i+2 : i+2+length].decode("utf-8", errors="replace")
-                    logger.info(f"PICO: {msg}")
-                    i += 2 + length
-                elif cmd == 0x0A or cmd == 0x0D: # Newlines/CR
-                    i += 1
-                else:
-                    # Might be raw text (traceback)
-                    text = data[i:].decode("utf-8", errors="replace")
-                    if "Traceback" in text:
-                        logger.error(f"PICO CRASHED:\n{text}")
-                    else:
-                        logger.debug(f"PICO RAW: {text}")
-                    break
-        except Exception as e:
-            logger.error(f"Error reading messages: {e}")
+        # Accumulate text for tracebacks (they come in multiple chunks)
+        if text:
+            self.text_buffer += text
+            # Check for complete traceback lines
+            if "\n" in self.text_buffer:
+                lines = self.text_buffer.split("\n")
+                # Keep the last incomplete line in buffer, process complete lines
+                self.text_buffer = lines[-1]
+                complete_text = "\n".join(lines[:-1])
+
+                # Process complete lines
+                if "Traceback" in complete_text:
+                    logger.error(f"PICO CRASHED:\n{complete_text}")
+                    self.text_buffer = ""  # Clear buffer after logging
+                elif "--- HEXAPOD_CRASH ---" in complete_text:
+                    logger.error(f"PICO Reported a Fatal Crash:\n{complete_text}")
+                    self.text_buffer = ""
+                elif "--- HEXAPOD_READY ---" in complete_text:
+                    logger.info("PICO Rebooted (Ready marker received).")
+                    self.text_buffer = ""
 
     def close(self):
         if self.conn:
@@ -138,6 +143,33 @@ class HexapodSerial:
             except:
                 pass
             self.conn = None
+        self.serial_buffer = None
+        self.text_buffer = ""
+
+    def _read_available(self) -> tuple[list[SerialPacket], str]:
+        """Reads all currently available data and returns (packets, text)."""
+        if not self.conn or not self.serial_buffer:
+            return [], ""
+
+        packets: list[SerialPacket] = []
+        raw_data = b""
+
+        if self.conn.in_waiting > 0:
+            raw_data = self.conn.read(self.conn.in_waiting)
+            for byte in raw_data:
+                packet = self.serial_buffer.feed(byte)
+                if packet:
+                    packets.append(packet)
+
+        text = raw_data.decode("utf-8", errors="replace")
+        return packets, text
+
+    def _default_ports(self):
+        system = platform.system()
+        if system == "Windows":
+            return [f"COM{i}" for i in range(3, 8)]
+        else:
+            return ["/dev/ttyACM0", "/dev/ttyUSB0", "/dev/ttyUSB1"]
 
 
 def create_hexapod() -> Body:
@@ -290,7 +322,6 @@ def main():
     finally:
         logger.info("Shutting down...")
         hp_serial.close()
-        gamepad.stop_reading()
         logger.info("Shutdown complete")
 
 
