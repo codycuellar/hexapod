@@ -8,6 +8,9 @@ from enum import Enum
 
 logger = logging.getLogger()
 
+HIGH_MASK = 0x80
+LOW_MASK = 0x7F
+
 
 class LegID(Enum):
     LF = 0
@@ -50,18 +53,17 @@ class Body:
         leg = self.legs[leg_id]
         return leg.foot_frame.get_origin_in_frame(self.frame)
 
-    def get_command_message(self):
-        angle_strs: list[str] = []
+    def get_servo_command(self):
+        data = bytearray()
+        count = 0
         for leg in self.legs.values():
-            servos: list[str] = []
-            servos.append(leg.coxa_control.get_command_message())
-            servos.append(leg.femur_control.get_command_message())
-            servos.append(leg.tibia_control.get_command_message())
-            for servo in servos:
-                if servo:
-                    angle_strs.append(servo)
-
-        return ",".join(angle_strs)
+            for servo in [leg.coxa_control, leg.femur_control, leg.tibia_control]:
+                count += 1
+                pin, angle = servo.pin_number, servo.get_angle()
+                angle = int(angle * 10.0 + 90.0)
+                data.extend([pin, angle & 0x7F, (angle >> 7) & 0x7F])
+        data.insert(0, count)
+        return data
 
 
 @dataclass

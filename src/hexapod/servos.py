@@ -9,14 +9,13 @@ This module provides different actuator implementations:
 
 
 class JointControl:
+    pin_number = 0
+
     def set_angle(self, frame_angle: float):
         return
 
     def get_angle(self) -> float:
         return 0.0
-
-    def get_command_message(self) -> str:
-        return ""
 
 
 class JointCalibration:
@@ -95,9 +94,6 @@ class Servo(JointControl):
     def get_angle(self) -> float:
         servo_angle = self.calibration.frame_to_servo_angle(self.frame_angle)
         return self.calibration.clamp_frame_angle(servo_angle)
-
-    def get_command_message(self) -> str:
-        return f"{self.pin_number}:{self.get_angle():0.2f}"
 
 
 class MockServo(JointControl):
