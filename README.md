@@ -7,6 +7,7 @@ The current hardware I'm using:
 - Deegoo FPV MG996r servos
 - Raspberry Pi 3 B+
 - Dual Shock Controller
+- XBox Controller (for Win Dev)
 
 # Setup (monorepo quickstart)
 

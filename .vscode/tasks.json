@@ -1,0 +1,26 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Deploy and Run Hexapod",
+            "type": "shell",
+            "command": "mpremote fs cp src/controller/*.py : && mpremote fs cp src/hexapod/common/*.py : && mpremote soft-reset && python -m hexapod.main",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Pico Soft-Reset",
+            "type": "shell",
+            "command": "mpremote soft-reset",
+            "problemMatcher": []
+        }
+    ]
+}
+
