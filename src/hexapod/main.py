@@ -9,8 +9,10 @@ import time
 import logging
 import serial
 import signal
-from types import FrameType
+import platform
 
+from hexapod.common.commands import CMD_SET_SERVO, CMD_PING, CMD_PONG, CMD_MESSAGE
+# from hexapod.common.serial_buffer import SerialBuffer
 from hexapod.gamepad import GamePad
 from hexapod.rigid_body import Body, Leg, LegID, LegConfig
 from hexapod.engine import Frame, Vec3d, Vec2d, Rotation
@@ -23,6 +25,119 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
+
+
+class HexapodSerial:
+    def __init__(self, ports=None, timeout=5):
+        self.ports = ports or self._default_ports()
+        self.timeout = timeout
+        self.conn = None
+        self.last_error = None
+
+    def _default_ports(self):
+        system = platform.system()
+        if system == "Windows":
+            return [f"COM{i}" for i in range(3, 15)]
+        else:
+            return ["/dev/ttyACM0", "/dev/ttyUSB0", "/dev/ttyUSB1"]
+
+    def connect(self):
+        """Attempts to find and connect to the hexapod board."""
+        start_time = time.time()
+        while time.time() - start_time < self.timeout:
+            for port in self.ports:
+                try:
+                    logger.info(f"Scanning {port}...")
+                    s = serial.Serial(port, 115200, timeout=0.5)
+
+                    # 1. Listen for a moment to see if it's already talking (traceback or READY)
+                    time.sleep(0.5)
+                    if s.in_waiting:
+                        data = s.read(s.in_waiting).decode("utf-8", errors="replace")
+                        if "Traceback" in data or "--- HEXAPOD_CRASH ---" in data:
+                            logger.error(f"CRITICAL: Found traceback on {port}:\n{data}")
+                            s.close()
+                            continue
+                        if "--- HEXAPOD_READY ---" in data:
+                            logger.info(f"Found ready board on {port}")
+                            self.conn = s
+                            return True
+
+                    # 2. Try to PING
+                    logger.debug(f"Sending PING to {port}")
+                    s.write(bytes([CMD_PING, 0x00]))
+                    s.flush()
+
+                    time.sleep(0.2)
+                    if s.in_waiting:
+                        response = s.read(s.in_waiting)
+                        # Protocol check: [CMD_PONG, 0x00]
+                        if len(response) >= 2 and response[0] == CMD_PONG:
+                            logger.info(f"Connected to Hexapod on {port}")
+                            self.conn = s
+                            return True
+
+                    s.close()
+                except (serial.SerialException, OSError) as e:
+                    if "Access is denied" in str(e):
+                        logger.warning(f"Port {port} is busy (is another program like Thonny or MicroPico open?)")
+                    continue
+            time.sleep(1)
+        return False
+
+    def send_servos(self, servo_data):
+        if not self.conn:
+            return False
+        try:
+            # Protocol: [CMD, LEN, DATA...]
+            buff = bytearray([CMD_SET_SERVO, len(servo_data)])
+            buff.extend(servo_data)
+            self.conn.write(buff)
+            self.conn.flush()
+            return True
+        except (serial.SerialException, OSError) as e:
+            logger.error(f"Write error: {e}")
+            self.close()
+            return False
+
+    def check_messages(self):
+        """Checks for incoming messages or errors from the board."""
+        if not self.conn or self.conn.in_waiting == 0:
+            return
+
+        try:
+            # This is a simple read - in a full implementation we'd use SerialBuffer
+            data = self.conn.read(self.conn.in_waiting)
+
+            # Check for binary protocol messages
+            i = 0
+            while i < len(data):
+                cmd = data[i]
+                if cmd == CMD_MESSAGE and i + 1 < len(data):
+                    length = data[i+1]
+                    msg = data[i+2 : i+2+length].decode("utf-8", errors="replace")
+                    logger.info(f"PICO: {msg}")
+                    i += 2 + length
+                elif cmd == 0x0A or cmd == 0x0D: # Newlines/CR
+                    i += 1
+                else:
+                    # Might be raw text (traceback)
+                    text = data[i:].decode("utf-8", errors="replace")
+                    if "Traceback" in text:
+                        logger.error(f"PICO CRASHED:\n{text}")
+                    else:
+                        logger.debug(f"PICO RAW: {text}")
+                    break
+        except Exception as e:
+            logger.error(f"Error reading messages: {e}")
+
+    def close(self):
+        if self.conn:
+            try:
+                self.conn.close()
+            except:
+                pass
+            self.conn = None
 
 
 def create_hexapod() -> Body:
@@ -88,58 +203,8 @@ def create_hexapod() -> Body:
     return Body(Frame(), legs)
 
 
-def find_serial_port() -> serial.Serial | None:
-    """
-    Attempt to find the Servo2040 serial port.
-    On Windows: typically COM3, COM4, etc.
-    On Linux: typically /dev/ttyACM0, /dev/ttyUSB0, etc.
-    """
-    import platform
-
-    timeout = 120
-
-    start_time = time.time()
-    system = platform.system()
-    ports: list[str] = []
-
-    if system == "Windows":
-        # Try common COM ports
-        for port_num in range(3, 10):
-            ports.append(f"COM{port_num}")
-    elif system == "Linux":
-        # Try common Linux serial devices
-        ports = [
-            "/dev/serial/by-id/NEEDS_ID_NAME",
-            "/dev/ttyACM0",
-            "/dev/ttyUSB0",
-            "/dev/ttyUSB1",
-        ]
-
-    while time.time() - start_time < timeout:
-        for port in ports:
-            try:
-                logging.info("Attempting to connect to device %s", port)
-                sconn = serial.Serial(port, 115200, timeout=0.1)
-                sconn.write(b"PING\n")
-                sconn.flush()
-                time.sleep(1)
-                if sconn.in_waiting:
-                    response = sconn.readline().decode("utf-8").strip()
-                    logger.info("response from comm is %s", response)
-                    if response == "PONG":
-                        return sconn
-                sconn.close()
-            except (serial.SerialException, OSError):
-                time.sleep(1)
-                continue
-
-    logging.error("Could not find servo controller board after %s seconds", start_time)
-    return None
-
-
 def main():
     """Main control loop for hexapod operation."""
-    # Setup signal handlers for graceful shutdown
     running = True
 
     logger.info("Creating hexapod geometry...")
@@ -154,7 +219,7 @@ def main():
     gamepad.start_reading()
 
     # Setup serial communication with Servo2040
-    comport = find_serial_port()
+    hp_serial = HexapodSerial(timeout=10)
 
     DT = 1 / 50  # Control loop frequency: 50 Hz
     next_time = time.perf_counter()
@@ -163,6 +228,13 @@ def main():
 
     try:
         while running:
+            # Check for connection
+            if not hp_serial.conn:
+                if not hp_serial.connect():
+                    # Still not connected, wait a bit and try again
+                    time.sleep(1)
+                    continue
+
             gait_vec = Vec2d()
             gait_turn = 0.0
 
@@ -200,21 +272,12 @@ def main():
             motion_planner.step(DT)
 
             # Send servo commands to hardware
-            if comport:
-                try:
-                    msg = body.get_command_message()
-                    comport.write((msg + "\n").encode("utf-8"))
+            servo_data = body.get_servo_command()
+            if not hp_serial.send_servos(servo_data):
+                logger.warning("Failed to send servo data, will attempt reconnect...")
 
-                    if comport.in_waiting > 0:
-                        response = comport.readline().decode("utf-8").strip()
-                        if response.startswith("RUNTIME_ERROR:") or response.startswith(
-                            "FATAL_ERROR:"
-                        ):
-                            logger.error(f"Servo2040 error: {response}")
-                except (serial.SerialException, OSError) as e:
-                    logger.error(f"Serial communication error: {e}")
-                    # Optionally try to reopen the port
-                    comport = None
+            # Check for messages (logs, tracebacks) from Pico
+            hp_serial.check_messages()
 
             # Maintain control loop timing
             next_time += DT
@@ -226,8 +289,8 @@ def main():
         logger.info("Interrupted by user")
     finally:
         logger.info("Shutting down...")
-        if comport:
-            comport.close()
+        hp_serial.close()
+        gamepad.stop_reading()
         logger.info("Shutdown complete")
 
 
