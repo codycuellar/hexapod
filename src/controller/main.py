@@ -54,8 +54,14 @@ def main():
                     byte = byte_data[0]
 
                     try:
+                        log_to_file(LogLevel.INFO, "receiving bytes")
                         packet = serial_buffer.feed(byte)
+                        log_to_file(
+                            LogLevel.INFO,
+                            "bytes received, sb in {}".format(serial_buffer.state),
+                        )
                         if packet:
+                            log_to_file(LogLevel.INFO, "got packet")
                             last_rx = now
                             led.set_blink(1, "blue", 1.0)
 

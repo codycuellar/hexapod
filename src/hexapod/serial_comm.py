@@ -4,9 +4,16 @@ import time
 import serial
 
 from hexapod.common.commands import *
-from hexapod.common.serial_buffer import FRAME_START, SerialBuffer, SerialPacket
+from hexapod.common.serial_buffer import SerialBuffer, SerialPacket
+
 
 logger = logging.getLogger(__name__)
+
+
+class CommandError(Exception):
+    """Raised when a command fails (NACK received)."""
+
+    pass
 
 
 class HexapodSerial:
@@ -15,8 +22,7 @@ class HexapodSerial:
         self.timeout = timeout
         self.conn = None
         self.serial_buffer = None
-        self.last_error = None
-        self.text_buffer = ""  # Accumulate text across multiple reads for tracebacks
+        self.text_buffer = ""
 
     def connect(self):
         """Attempts to find and connect to the hexapod servo2040 board."""
@@ -27,22 +33,24 @@ class HexapodSerial:
                     logger.info(f"Scanning {port}...")
                     self.conn = serial.Serial(port, 115200, timeout=0.5)
                     self.serial_buffer = SerialBuffer()
-                    self.text_buffer = ""  # Reset text buffer on new connection
+                    self.text_buffer = ""
 
-                    # 1. Look for immediate irrecoverable crash
                     time.sleep(0.5)
+                    logger.info("reading available bytes")
                     packets, text = self._read_available()
+                    logger.info(
+                        "read packets and info: len of packets ({}), text: {}".format(
+                            len(packets), text
+                        )
+                    )
                     if "Traceback" in text or "--- HEXAPOD_CRASH ---" in text:
                         logger.error(
-                            f"CRITICAL: Device {port} crashed and likely cannot recover without software"
-                            + " changes. Traceback:\n{text}"
+                            f"CRITICAL: Device {port} crashed. Traceback:\n{text}"
                         )
                         self.close()
                         continue
 
-                    # we will ping/pong for ready state
                     logger.debug(f"Sending PING to {port}")
-                    # Send PING: !P00:\n
                     self._send_frame(CMD_PING, bytearray())
                     self.conn.flush()
 
@@ -50,67 +58,105 @@ class HexapodSerial:
                     packets, _ = self._read_available()
                     for packet in packets:
                         if packet.cmd == CMD_PONG:
-                            logger.info(
-                                f"Received PONG, successfully conntected to {port}"
-                            )
+                            logger.info(f"Connected to {port}")
                             return True
 
                     self.close()
                 except (serial.SerialException, OSError) as e:
                     if "Access is denied" in str(e):
-                        logger.warning(
-                            f"Port {port} is busy (is another program like Thonny or MicroPico open?)"
-                        )
+                        logger.warning(f"Port {port} is busy")
                     self.close()
                     continue
             time.sleep(1)
         return False
 
-    def send_servos(self, servo_data: bytearray):
-        """Send servo command using ASCII protocol: !S<len>:<hex_data>\n"""
+    def send_servos(self, servos: list[tuple[int, float]]):
+        """
+        Send servo command.
+
+        Args:
+            servos: List of (pin, angle_degrees) tuples
+
+        Returns:
+            True if sent successfully, False otherwise
+
+        Raises:
+            CommandError: If NACK received (command failed on device)
+        """
         if not self.conn:
             return False
+
         try:
-            self._send_frame(CMD_SET_SERVO, servo_data)
+            # Encode servo data: [count, pin, angle_high, angle_low, ...]
+            data = bytearray([len(servos)])
+            for pin, angle in servos:
+                # Encode angle: (angle + 90) * 10 maps -90°→0, 0°→900, +90°→1800
+                angle_raw = int((angle + 90.0) * 10.0)
+                data.extend([pin, (angle_raw >> 8) & 0xFF, angle_raw & 0xFF])
+
+            self._send_frame(CMD_SET_SERVO, data)
             self.conn.flush()
+
+            # Check for ACK/NACK response
+            time.sleep(0.01)  # Brief wait for response
+            packets, _ = self._read_available()
+            for packet in packets:
+                if packet.cmd == CMD_RESPONSE:
+                    if len(packet.data) >= 2:
+                        code = SerialBuffer.decode_hex_pair(
+                            packet.data[0], packet.data[1]
+                        )
+                        if code == NACK:
+                            raise CommandError(
+                                "Servo command rejected by device (NACK)"
+                            )
+                        # ACK is success, no exception
+
             return True
+        except CommandError:
+            raise
         except (serial.SerialException, OSError) as e:
             logger.error(f"Write error: {e}")
             self.close()
             return False
 
-    def check_messages(self):
-        """Checks for incoming messages or errors from the board."""
-        packets, text = self._read_available()
+    def check_messages(self) -> list[str]:
+        """
+        Check for incoming messages from the board.
 
-        # Process binary packets
+        Returns:
+            List of message strings (empty if none)
+        """
+        packets, text = self._read_available()
+        messages = []
+
+        # Process protocol packets
         for packet in packets:
             if packet.cmd == CMD_MESSAGE:
-                msg = packet.data.decode("utf-8", errors="replace")
-                logger.info(f"PICO: {msg}")
-            else:
-                logger.debug(f"PICO BINARY CMD: {packet.cmd:#02x}")
+                try:
+                    raw_bytes = SerialBuffer.decode_hex_string(packet.data)
+                    msg = raw_bytes.decode("utf-8", errors="replace")
+                    messages.append(msg)
+                    logger.info(f"PICO: {msg}")
+                except Exception as e:
+                    logger.warning(f"Failed to decode message: {e}")
 
-        # Accumulate text for tracebacks (they come in multiple chunks)
+        # Process text tracebacks
         if text:
             self.text_buffer += text
-            # Check for complete traceback lines
             if "\n" in self.text_buffer:
                 lines = self.text_buffer.split("\n")
-                # Keep the last incomplete line in buffer, process complete lines
                 self.text_buffer = lines[-1]
                 complete_text = "\n".join(lines[:-1])
 
-                # Process complete lines
                 if "Traceback" in complete_text:
                     logger.error(f"PICO CRASHED:\n{complete_text}")
-                    self.text_buffer = ""  # Clear buffer after logging
                 elif "--- HEXAPOD_CRASH ---" in complete_text:
-                    logger.error(f"PICO Reported a Fatal Crash:\n{complete_text}")
-                    self.text_buffer = ""
+                    logger.error(f"PICO FATAL CRASH:\n{complete_text}")
                 elif "--- HEXAPOD_READY ---" in complete_text:
-                    logger.info("PICO Rebooted (Ready marker received).")
-                    self.text_buffer = ""
+                    logger.info("PICO Rebooted")
+
+        return messages
 
     def close(self):
         if self.conn:
@@ -123,29 +169,18 @@ class HexapodSerial:
         self.text_buffer = ""
 
     def _send_frame(self, cmd: int, data: bytearray):
+        """Send ASCII protocol frame."""
         if not self.conn:
             return
-
-        frame = bytearray([FRAME_START, cmd])
-        frame.extend(SerialBuffer.byte_to_hex_bytes(len(data)))
-        for char_byte in data:
-            frame.extend(SerialBuffer.byte_to_hex_bytes(char_byte))
-        self.conn.write(bytes(frame))
-
-    @staticmethod
-    def _int_to_hex(value: int) -> int:
-        """Convert 0-15 to ASCII hex character."""
-        if 0 <= value <= 9:
-            return ord("0") + value
-        else:
-            return ord("A") + (value - 10)
+        frame = SerialBuffer.build_frame(cmd, data)
+        self.conn.write(frame)
 
     def _read_available(self) -> tuple[list[SerialPacket], str]:
-        """Reads all currently available data and returns (packets, text)."""
+        """Read available data and return (packets, text)."""
         if not self.conn or not self.serial_buffer:
             return [], ""
 
-        packets: list[SerialPacket] = []
+        packets = []
         raw_data = b""
 
         if self.conn.in_waiting > 0:

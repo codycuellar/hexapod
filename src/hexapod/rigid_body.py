@@ -53,23 +53,20 @@ class Body:
         leg = self.legs[leg_id]
         return leg.foot_frame.get_origin_in_frame(self.frame)
 
-    def get_servo_command(self):
-        data = bytearray()
-        count = 0
+    def get_servo_angles(self):
+        """
+        Get current servo positions as list of (pin, angle) tuples.
+
+        Returns:
+            List of (pin_number, angle_degrees) tuples
+        """
+        servos: list[tuple[int, float]] = []
         for leg in self.legs.values():
             for servo in [leg.coxa_control, leg.femur_control, leg.tibia_control]:
-                count += 1
                 pin = servo.pin_number
                 angle = servo.get_angle()
-                # Convert angle to wire format: multiply by 10 and offset so -90° = 0
-                angle_raw = int(angle * 10.0 + 90.0)
-                # Split into high and low bytes
-                angle_high = (angle_raw >> 8) & 0xFF
-                angle_low = angle_raw & 0xFF
-                data.extend([pin, angle_high, angle_low])
-        # Insert count at the beginning
-        data.insert(0, count)
-        return data
+                servos.append((pin, angle))
+        return servos
 
 
 @dataclass

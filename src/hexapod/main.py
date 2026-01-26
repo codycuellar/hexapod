@@ -12,7 +12,7 @@ from hexapod.engine import Frame, Vec3d, Vec2d, Rotation
 from hexapod.gamepad import GamePad
 from hexapod.motion_planner import MotionPlanner
 from hexapod.rigid_body import Body, Leg, LegID, LegConfig
-from hexapod.serial_comm import HexapodSerial
+from hexapod.serial_comm import HexapodSerial, CommandError
 from hexapod.servos import Servo
 
 
@@ -155,9 +155,15 @@ def main():
             motion_planner.step(DT)
 
             # Send servo commands to hardware
-            servo_data = body.get_servo_command()
-            if not hp_serial.send_servos(servo_data):
-                logger.warning("Failed to send servo data, will attempt reconnect...")
+            servo_data = body.get_servo_angles()
+            try:
+                if not hp_serial.send_servos(servo_data):
+                    logger.warning(
+                        "Failed to send servo data, will attempt reconnect..."
+                    )
+            except CommandError as e:
+                logger.error(f"Command failed: {e}")
+                # Could trigger reconnect or other error handling here
 
             # Check for messages (logs, tracebacks) from Pico
             hp_serial.check_messages()
