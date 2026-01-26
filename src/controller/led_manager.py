@@ -16,7 +16,7 @@ class LedManager:
         self.leds.start()
         # Available states are:
         # 'on', 'off', 'blink', 'pulse', blink turns on and off based on the time.
-        # of time.
+            # of time.
         self.states = {
             i: {
                 "effect": "off",

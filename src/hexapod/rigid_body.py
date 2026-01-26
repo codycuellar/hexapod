@@ -59,9 +59,15 @@ class Body:
         for leg in self.legs.values():
             for servo in [leg.coxa_control, leg.femur_control, leg.tibia_control]:
                 count += 1
-                pin, angle = servo.pin_number, servo.get_angle()
-                angle = int(angle * 10.0 + 90.0)
-                data.extend([pin, angle & 0x7F, (angle >> 7) & 0x7F])
+                pin = servo.pin_number
+                angle = servo.get_angle()
+                # Convert angle to wire format: multiply by 10 and offset so -90° = 0
+                angle_raw = int(angle * 10.0 + 90.0)
+                # Split into high and low bytes
+                angle_high = (angle_raw >> 8) & 0xFF
+                angle_low = angle_raw & 0xFF
+                data.extend([pin, angle_high, angle_low])
+        # Insert count at the beginning
         data.insert(0, count)
         return data
 

@@ -8,11 +8,13 @@ from servo import ServoCluster, servo2040
 from serial_buffer import SerialBuffer
 from command_processor import CommandProcessor
 from led_manager import LedManager
-from utils import log_to_file, LogLevel
+from utils import log_to_file, clear_log, LogLevel
 
 
 def main():
     log_to_file(LogLevel.INFO, "Servo2040 Booting Up...")
+
+    clear_log()
     gc.collect()
 
     # Use ONE cluster to save all hardware resources
@@ -22,6 +24,8 @@ def main():
 
     log_to_file(LogLevel.INFO, "Initializing LEDs")
     led = LedManager(servo2040.NUM_LEDS, 0, 1)
+    for i in range(6):
+        led.set_off(i)
 
     log_to_file(LogLevel.INFO, "Initializing serial buffer")
     spoll = uselect.poll()
@@ -32,7 +36,8 @@ def main():
     last_t = time.ticks_ms()
     last_rx = time.ticks_ms()
 
-    led.set_on(0, "green", 0.25)
+    led.set_on(0, "blue", 0.25)
+    log_to_file(LogLevel.INFO, "Entering main loop")
     try:
         while True:
             now = time.ticks_ms()
@@ -42,15 +47,13 @@ def main():
             led.step(dt)
 
             if spoll.poll(0):
-                try:
-                    while True:
-                        byte_data = usys.stdin.buffer.read(1)
-                        if not byte_data or len(byte_data) == 0:
-                            break
-                        byte = byte_data[0]
-                        # Protocol uses safe ASCII for commands and high bits for data,
-                        # so no control characters will trigger REPL interrupts
+                while True:  # read all availble bytes
+                    byte_data = usys.stdin.buffer.read(1)
+                    if not byte_data or len(byte_data) == 0:
+                        break
+                    byte = byte_data[0]
 
+                    try:
                         packet = serial_buffer.feed(byte)
                         if packet:
                             last_rx = now
@@ -59,13 +62,16 @@ def main():
                             success = cmd_processor.dispatch(packet)
                             if not success:
                                 led.set_pulse(5, "red", 5.0, 1.0)
-                except OSError:
-                    # No data available or I/O error
-                    pass
+                            break
+                    except Exception as e:
+                        log_to_file(LogLevel.WARN, e)
+                        break
 
             # Update LED status based on time since last RX
             if time.ticks_diff(now, last_rx) > 1000:
                 led.set_off(1)
+    except Exception as e:
+        log_to_file(LogLevel.FATAL, e)
     finally:
         for i in range(6):
             led.set_off(i)
