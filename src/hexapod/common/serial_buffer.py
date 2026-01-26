@@ -163,19 +163,24 @@ class SerialBuffer:
                 # Now self.len is the number of hex character bytes to read
                 self.bytes_left = self.len
                 self._set_state(self.STATE_DATA)
+                # If length is 0, packet is complete immediately
+                if self.bytes_left == 0:
+                    packet = SerialPacket(self.cmd, bytes(self.data))
+                    self._reset()
+                    self._set_state(self.STATE_WAITING)
+                    return packet
                 return None
 
         elif self.state == self.STATE_DATA:
             # Read hex character bytes (the actual ASCII hex digits)
             self.data.append(byte)
             self.bytes_left -= 1
-
-        # Check if packet is complete
-        if self.state == self.STATE_DATA and self.bytes_left == 0:
-            packet = SerialPacket(self.cmd, bytes(self.data))
-            self._reset()
-            self._set_state(self.STATE_WAITING)
-            return packet
+            # Check if packet is complete after reading this byte
+            if self.bytes_left == 0:
+                packet = SerialPacket(self.cmd, bytes(self.data))
+                self._reset()
+                self._set_state(self.STATE_WAITING)
+                return packet
 
         return None
 

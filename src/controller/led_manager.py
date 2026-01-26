@@ -32,10 +32,28 @@ class LedManager:
         self.states[idx] = {"effect": "on", "color": color, "brightness": brightness}
 
     def set_off(self, idx: int):
-        self.states[idx] = {"effect": "off"}
+        # Preserve existing state structure, just change effect
+        if idx in self.states:
+            self.states[idx]["effect"] = "off"
+        else:
+            self.states[idx] = {"effect": "off"}
 
     def set_blink(self, idx: int, color: str, duration: float, brightness: float = 0.5):
-        if self.states[idx]["effect"] != "blink":
+        # If already blinking, preserve the timer to let the cycle continue naturally
+        # Only update if color/brightness/duration actually changed
+        state = self.states[idx]
+        if state.get("effect") == "blink":
+            # Only update if values changed to avoid unnecessary state updates
+            if state.get("color") != color:
+                state["color"] = color
+            if state.get("brightness") != brightness:
+                state["brightness"] = brightness
+            if state.get("duration") != duration:
+                # If duration changes, reset timer to maintain phase
+                state["duration"] = duration
+                state["timer"] = 0.0
+        else:
+            # Starting a new blink - initialize everything
             self.states[idx] = {
                 "effect": "blink",
                 "color": color,
@@ -61,12 +79,17 @@ class LedManager:
             elif effect == "on":
                 self._turn_on(idx, state["color"], state["brightness"])
             elif effect == "blink":
-                state["timer"] += dt
-                state["timer"] = state["timer"] % state["duration"]
-                phase = state["timer"] / state["duration"]
-                if phase < 0.5:
-                    self._turn_on(idx, state["color"], state["brightness"])
+                duration = state.get("duration", 1.0)
+                if duration > 0:
+                    state["timer"] = state.get("timer", 0.0) + dt
+                    state["timer"] = state["timer"] % duration
+                    phase = state["timer"] / duration
+                    if phase < 0.5:
+                        self._turn_on(idx, state.get("color", "blue"), state.get("brightness", 0.5))
+                    else:
+                        self._turn_off(idx)
                 else:
+                    # Invalid duration, just turn off
                     self._turn_off(idx)
             elif effect == "pulse":
                 if state["timer"] > 0:

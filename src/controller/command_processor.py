@@ -90,4 +90,3 @@ class CommandProcessor:
         """
         frame = SerialBuffer.build_frame(cmd, data)
         self.output_stream.buffer.write(frame)
-        self.output_stream.flush()

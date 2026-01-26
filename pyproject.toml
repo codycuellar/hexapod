@@ -22,7 +22,7 @@ sim = ["matplotlib>=3.10.1"]
 dev = ["mpremote>=1.22.0"]
 
 [project.scripts]
-hexapod = "hexapod.main:main"
+hexapod = "hexapod:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

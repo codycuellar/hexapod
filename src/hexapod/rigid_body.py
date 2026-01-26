@@ -2,7 +2,7 @@ import math
 import logging
 from dataclasses import dataclass
 
-from hexapod.servos import JointControl
+from hexapod.servos import JointControl, ServoAngles
 from hexapod.engine import Frame, Vec3d, Vec2d, Rotation
 from enum import Enum
 
@@ -60,12 +60,12 @@ class Body:
         Returns:
             List of (pin_number, angle_degrees) tuples
         """
-        servos: list[tuple[int, float]] = []
+        servos: ServoAngles = {}
         for leg in self.legs.values():
             for servo in [leg.coxa_control, leg.femur_control, leg.tibia_control]:
                 pin = servo.pin_number
                 angle = servo.get_angle()
-                servos.append((pin, angle))
+                servos[pin] = angle
         return servos
 
 

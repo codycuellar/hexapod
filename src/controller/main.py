@@ -1,6 +1,6 @@
 import gc
 import usys
-import time
+import utime
 import uselect
 
 from servo import ServoCluster, servo2040
@@ -33,15 +33,15 @@ def main():
     serial_buffer = SerialBuffer()
     cmd_processor = CommandProcessor(cluster, usys.stdout)
 
-    last_t = time.ticks_ms()
-    last_rx = time.ticks_ms()
+    last_t = utime.ticks_ms()
+    last_rx = utime.ticks_ms()
 
     led.set_on(0, "blue", 0.25)
     log_to_file(LogLevel.INFO, "Entering main loop")
     try:
         while True:
-            now = time.ticks_ms()
-            dt = time.ticks_diff(now, last_t) / 1000.0
+            now = utime.ticks_ms()
+            dt = utime.ticks_diff(now, last_t) / 1000.0
             last_t = now
 
             led.step(dt)
@@ -54,16 +54,10 @@ def main():
                     byte = byte_data[0]
 
                     try:
-                        log_to_file(LogLevel.INFO, "receiving bytes")
                         packet = serial_buffer.feed(byte)
-                        log_to_file(
-                            LogLevel.INFO,
-                            "bytes received, sb in {}".format(serial_buffer.state),
-                        )
                         if packet:
-                            log_to_file(LogLevel.INFO, "got packet")
                             last_rx = now
-                            led.set_blink(1, "blue", 1.0)
+                            led.set_blink(1, "green", 1.0, 0.2)
 
                             success = cmd_processor.dispatch(packet)
                             if not success:
@@ -74,7 +68,7 @@ def main():
                         break
 
             # Update LED status based on time since last RX
-            if time.ticks_diff(now, last_rx) > 1000:
+            if utime.ticks_diff(now, last_rx) > 1000:
                 led.set_off(1)
     except Exception as e:
         log_to_file(LogLevel.FATAL, e)
@@ -100,4 +94,4 @@ if __name__ == "__main__":
 
         # Keep the REPL alive but visible
         while True:
-            time.sleep(1)
+            utime.sleep(1)

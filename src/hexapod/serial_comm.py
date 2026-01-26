@@ -5,7 +5,7 @@ import serial
 
 from hexapod.common.commands import *
 from hexapod.common.serial_buffer import SerialBuffer, SerialPacket
-
+from hexapod.servos import ServoAngles
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,7 @@ class HexapodSerial:
         self.conn = None
         self.serial_buffer = None
         self.text_buffer = ""
+        self.last_servo_angles: dict[int, float] = {}
 
     def connect(self):
         """Attempts to find and connect to the hexapod servo2040 board."""
@@ -70,7 +71,7 @@ class HexapodSerial:
             time.sleep(1)
         return False
 
-    def send_servos(self, servos: list[tuple[int, float]]):
+    def send_servos(self, servos: ServoAngles):
         """
         Send servo command.
 
@@ -86,13 +87,28 @@ class HexapodSerial:
         if not self.conn:
             return False
 
+        new_servos: dict[int, float] = {}
         try:
             # Encode servo data: [count, pin, angle_high, angle_low, ...]
-            data = bytearray([len(servos)])
-            for pin, angle in servos:
-                # Encode angle: (angle + 90) * 10 maps -90°→0, 0°→900, +90°→1800
-                angle_raw = int((angle + 90.0) * 10.0)
-                data.extend([pin, (angle_raw >> 8) & 0xFF, angle_raw & 0xFF])
+            data = bytearray()
+            for pin, angle in servos.items():
+                # check if the servo angle is new since the last frame, angle cannot be 999
+                # so we use that as a default incase the servo wasn't update last frame.
+                if round(self.last_servo_angles.get(pin, 999), 1) != round(angle, 1):
+                    self.last_servo_angles[pin] = angle
+                    new_servos[pin] = angle
+                    # Encode angles as positive value int with 1 decimal precision:
+                    # -90.0 to 90.0 becomes 0-1800
+                    angle_raw = int((angle + 90.0) * 10.0)
+                    data.extend([pin, (angle_raw >> 8) & 0xFF, angle_raw & 0xFF])
+
+            # do nothing if we have no new servos to update
+            servos_to_update = len(new_servos.keys())
+            if servos_to_update == 0:
+                return True
+
+            # add the count of servos we're sending
+            data.insert(0, servos_to_update)
 
             self._send_frame(CMD_SET_SERVO, data)
             self.conn.flush()
@@ -113,8 +129,6 @@ class HexapodSerial:
                         # ACK is success, no exception
 
             return True
-        except CommandError:
-            raise
         except (serial.SerialException, OSError) as e:
             logger.error(f"Write error: {e}")
             self.close()
@@ -128,7 +142,7 @@ class HexapodSerial:
             List of message strings (empty if none)
         """
         packets, text = self._read_available()
-        messages = []
+        messages: list[str] = []
 
         # Process protocol packets
         for packet in packets:
@@ -180,7 +194,7 @@ class HexapodSerial:
         if not self.conn or not self.serial_buffer:
             return [], ""
 
-        packets = []
+        packets: list[SerialPacket] = []
         raw_data = b""
 
         if self.conn.in_waiting > 0:

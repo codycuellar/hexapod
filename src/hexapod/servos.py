@@ -7,6 +7,11 @@ This module provides different actuator implementations:
 - VisualizationControl: Real-time 3D visualization control
 """
 
+from typing import TypeAlias, Dict
+
+
+ServoAngles: TypeAlias = Dict[int, float]
+
 
 class JointControl:
     pin_number = 0

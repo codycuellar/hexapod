@@ -22,7 +22,7 @@
             "label": "Hexapod: Deploy and Run",
             "dependsOn": "Pico: Deploy Files",
             "type": "shell",
-            "command": "mpremote reset && python -m hexapod.main",
+            "command": "mpremote reset && python -m hexapod",
             "group": {
                 "kind": "build",
                 "isDefault": true
