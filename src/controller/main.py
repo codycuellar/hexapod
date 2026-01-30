@@ -7,7 +7,7 @@ from servo import ServoCluster, servo2040
 
 from serial_buffer import SerialBuffer
 from command_processor import CommandProcessor
-from led_manager import LedManager
+from led_manager import LedManager, LEDBlink, LEDPulse, LEDSolid, LEDOff, LEDColor
 from utils import log_to_file, clear_log, LogLevel
 
 
@@ -23,9 +23,11 @@ def main():
     cluster = ServoCluster(0, 0, pins)
 
     log_to_file(LogLevel.INFO, "Initializing LEDs")
-    led = LedManager(servo2040.NUM_LEDS, 0, 1)
-    for i in range(6):
-        led.set_off(i)
+    LED_RUNNING = (0, LEDSolid(LEDColor("blue", 1.0, 0.25)))
+    LED_RCV_DATA = (1, LEDBlink(LEDColor("green", 1.0, 0.2), 0.2))
+    LED_NO_DATA = (1, LEDOff())
+    LED_ERROR = (2, LEDPulse(LEDColor("red", 1.0, 1.0), 3.0))
+    led_manager = LedManager(1, 0)
 
     log_to_file(LogLevel.INFO, "Initializing serial buffer")
     spoll = uselect.poll()
@@ -33,18 +35,15 @@ def main():
     serial_buffer = SerialBuffer()
     cmd_processor = CommandProcessor(cluster, usys.stdout)
 
-    last_t = utime.ticks_ms()
     last_rx = utime.ticks_ms()
 
-    led.set_on(0, "blue", 0.25)
+    led_manager.set_effect(*LED_RUNNING)
     log_to_file(LogLevel.INFO, "Entering main loop")
     try:
         while True:
             now = utime.ticks_ms()
-            dt = utime.ticks_diff(now, last_t) / 1000.0
-            last_t = now
 
-            led.step(dt)
+            led_manager.step(now)
 
             if spoll.poll(0):
                 while True:  # read all availble bytes
@@ -57,11 +56,11 @@ def main():
                         packet = serial_buffer.feed(byte)
                         if packet:
                             last_rx = now
-                            led.set_blink(1, "green", 1.0, 0.2)
+                            led_manager.set_effect(*LED_RCV_DATA)
 
                             success = cmd_processor.dispatch(packet)
                             if not success:
-                                led.set_pulse(5, "red", 5.0, 1.0)
+                                led_manager.set_effect(*LED_ERROR)
                             break
                     except Exception as e:
                         log_to_file(LogLevel.WARN, e)
@@ -69,12 +68,12 @@ def main():
 
             # Update LED status based on time since last RX
             if utime.ticks_diff(now, last_rx) > 1000:
-                led.set_off(1)
+                led_manager.set_effect(*LED_NO_DATA)
     except Exception as e:
         log_to_file(LogLevel.FATAL, e)
     finally:
         for i in range(6):
-            led.set_off(i)
+            led_manager.set_effect(i, LEDOff())
 
 
 if __name__ == "__main__":

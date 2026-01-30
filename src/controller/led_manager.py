@@ -1,106 +1,89 @@
 from plasma import WS2812
 from servo import servo2040
 
+import utime
 
-class LedManager:
+from utils import log_led
+
+
+class LEDColor:
     colors = {
-        "red": (0.0, 1.0),
-        "orange": (0.08, 1.0),
-        "yellow": (0.16, 1.0),
-        "green": (0.33, 1.0),
-        "blue": (0.66, 1.0),
+        "red": 0.0,
+        "orange": 0.08,
+        "yellow": 0.16,
+        "green": 0.33,
+        "blue": 0.66,
     }
 
-    def __init__(self, num_leds: int, pio: int, sm: int):
-        self.leds = WS2812(num_leds, pio, sm, servo2040.LED_DATA)
+    def __init__(self, h: str = "blue", s: float = 1.0, v: float = 0.0):
+        self.values = (self.colors[h], s, v)
+
+
+class LEDEffect:
+    def update(self, now_ms: int) -> "tuple[float, float, float] | None":
+        return
+
+
+# naming semantics
+class LEDOff(LEDEffect):
+    pass
+
+
+class LEDSolid(LEDEffect):
+    def __init__(self, color: LEDColor):
+        self.color = color.values
+
+    def update(self, now_ms: int):
+        return self.color
+
+
+class LEDBlink(LEDEffect):
+    def __init__(self, color: LEDColor, interval_s: float = 1.0):
+        self.color = color.values
+        self.interval_ms = int(interval_s * 1000)
+        self.interval_half_ms = self.interval_ms // 2
+
+    def update(self, now_ms: int):
+        if self.interval_half_ms <= 0:
+            return None
+
+        if (now_ms // self.interval_half_ms) & 1 == 0:
+            return self.color
+
+        return None
+
+
+class LEDPulse(LEDEffect):
+    def __init__(self, color: LEDColor, duration_s: float = 5.0):
+        self.color = color.values
+        self.end_ms = utime.ticks_ms() + int(duration_s * 1000)
+
+    def update(self, now_ms: int):
+        if utime.ticks_diff(self.end_ms, now_ms) > 0:
+            return self.color
+
+        return None
+
+
+class LedManager:
+    def __init__(self, pio: int, sm: int):
+        self.leds = WS2812(servo2040.NUM_LEDS, pio, sm, servo2040.LED_DATA)
         self.leds.start()
-        # Available states are:
-        # 'on', 'off', 'blink', 'pulse', blink turns on and off based on the time.
-            # of time.
-        self.states = {
-            i: {
-                "effect": "off",
-                "color": "green",
-                "brightness": 0.0,
-                "duration": 0.0,  # used for blink and pulse
-                "timer": 0.0,  # internal for blink
-            }
-            for i in range(num_leds)
-        }
+        self.effects = [LEDEffect()] * servo2040.NUM_LEDS
+        self.last_cmd = [
+            (0, 0, 0)
+        ] * servo2040.NUM_LEDS  # type: list[tuple[float, float, float] | None]
 
-    def set_on(self, idx: int, color: str, brightness: float = 0.5):
-        self.states[idx] = {"effect": "on", "color": color, "brightness": brightness}
+    def set_effect(self, idx: int, effect: LEDEffect):
+        self.effects[idx] = effect
 
-    def set_off(self, idx: int):
-        # Preserve existing state structure, just change effect
-        if idx in self.states:
-            self.states[idx]["effect"] = "off"
-        else:
-            self.states[idx] = {"effect": "off"}
-
-    def set_blink(self, idx: int, color: str, duration: float, brightness: float = 0.5):
-        # If already blinking, preserve the timer to let the cycle continue naturally
-        # Only update if color/brightness/duration actually changed
-        state = self.states[idx]
-        if state.get("effect") == "blink":
-            # Only update if values changed to avoid unnecessary state updates
-            if state.get("color") != color:
-                state["color"] = color
-            if state.get("brightness") != brightness:
-                state["brightness"] = brightness
-            if state.get("duration") != duration:
-                # If duration changes, reset timer to maintain phase
-                state["duration"] = duration
-                state["timer"] = 0.0
-        else:
-            # Starting a new blink - initialize everything
-            self.states[idx] = {
-                "effect": "blink",
-                "color": color,
-                "brightness": brightness,
-                "duration": duration,
-                "timer": 0.0,
-            }
-
-    def set_pulse(self, idx: int, color: str, duration: float, brightness: float = 0.5):
-        self.states[idx] = {
-            "effect": "pulse",
-            "color": color,
-            "brightness": brightness,
-            "duration": duration,
-            "timer": duration,
-        }
-
-    def step(self, dt: float):
-        for idx, state in self.states.items():
-            effect = state["effect"]
-            if effect == "off":
-                self._turn_off(idx)
-            elif effect == "on":
-                self._turn_on(idx, state["color"], state["brightness"])
-            elif effect == "blink":
-                duration = state.get("duration", 1.0)
-                if duration > 0:
-                    state["timer"] = state.get("timer", 0.0) + dt
-                    state["timer"] = state["timer"] % duration
-                    phase = state["timer"] / duration
-                    if phase < 0.5:
-                        self._turn_on(idx, state.get("color", "blue"), state.get("brightness", 0.5))
-                    else:
-                        self._turn_off(idx)
+    def step(self, now_ms):
+        for i, effect in enumerate(self.effects):
+            color = effect.update(now_ms)
+            if color != self.last_cmd[i]:
+                self.last_cmd[i] = color
+                if color is None:
+                    self.leds.set_rgb(i, 0, 0, 0)
                 else:
-                    # Invalid duration, just turn off
-                    self._turn_off(idx)
-            elif effect == "pulse":
-                if state["timer"] > 0:
-                    self._turn_on(idx, state["color"], state["brightness"])
-                    state["timer"] -= dt
-                else:
-                    state["effect"] = "off"
-
-    def _turn_on(self, idx: int, color: str, brightness: float):
-        h, s = self.colors[color]
-        self.leds.set_hsv(idx, h, s, brightness)
-
-    def _turn_off(self, idx: int):
-        self.leds.set_rgb(idx, 0, 0, 0, 0)
+                    h, s, v = color
+                    self.leds.set_hsv(i, h, s, v)

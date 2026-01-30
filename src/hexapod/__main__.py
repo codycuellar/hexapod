@@ -103,7 +103,8 @@ def main():
     gamepad.start_reading()
 
     # Setup serial communication with Servo2040
-    hp_serial = HexapodSerial(timeout=10)
+    hp_serial = HexapodSerial(connect_timeout=10)
+    hp_serial.connect()
 
     DT = 1 / FPS
     prev_time = time.perf_counter()
@@ -114,10 +115,7 @@ def main():
         while running:
             # Check for connection
             if not hp_serial.conn:
-                if not hp_serial.connect():
-                    # Still not connected, wait a bit and try again
-                    time.sleep(1)
-                    continue
+                hp_serial.connect()
 
             gait_vec = Vec2d()
             gait_turn = 0.0

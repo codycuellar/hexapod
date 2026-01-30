@@ -1,3 +1,6 @@
+import utime
+
+
 class LogLevel:
     INFO = 0
     WARN = 1
@@ -24,4 +27,14 @@ def log_to_file(level: int, error_msg):
             f.write(l + ": " + str(error_msg) + "\n")
     except:
         # If we can't write to file (e.g. no memory), at least we tried
+        pass
+
+
+def log_led(msg: str):
+    """Append a timestamped LED log line to log.txt."""
+    ts = utime.ticks_ms()
+    try:
+        with open("log.txt", "a") as f:
+            f.write("[{}] LED: {}\n".format(ts, msg))
+    except:
         pass

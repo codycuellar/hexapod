@@ -1,5 +1,10 @@
 {
     "version": "2.0.0",
+    "options": {
+        "env": {
+            "PATH": "${workspaceFolder:Root}/venv/Scripts;${env:PATH}"
+        }
+    },
     "tasks": [
         {
             "label": "Pico: Deploy Files",

@@ -17,16 +17,15 @@ class CommandError(Exception):
 
 
 class HexapodSerial:
-    def __init__(self, timeout: float = 20.0):
+    def __init__(self, connect_timeout: float = 20.0):
         system = platform.system()
         if system == "Windows":
             self.ports = [f"COM{i}" for i in range(3, 8)]
         else:
             self.ports = ["/dev/ttyACM0", "/dev/ttyUSB0", "/dev/ttyUSB1"]
-        self.timeout = timeout
+        self.timeout = connect_timeout
         self.conn = None
         self.serial_buffer = None
-        self.text_buffer = ""
         self.last_servo_angles: dict[int, float] = {}
 
     def connect(self):
@@ -37,8 +36,8 @@ class HexapodSerial:
                 try:
                     self._connect_to_port(port)
                     return True
-                except (serial.SerialException, OSError) as e:
-                    logger.error(str(e))
+                except (serial.SerialException, OSError, FileNotFoundError) as e:
+                    logger.debug(str(e))
                     self.close()
                     continue
             time.sleep(1)
@@ -52,7 +51,6 @@ class HexapodSerial:
                 pass
             self.conn = None
         self.serial_buffer = None
-        self.text_buffer = ""
 
     def send_servos(self, servos: ServoAngles):
         if not self.conn:
@@ -158,7 +156,6 @@ class HexapodSerial:
         self.conn = serial.Serial(port, 115200, timeout=0.5)
         logger.info(f"Scanning {port}...")
         self.serial_buffer = SerialBuffer()
-        self.text_buffer = ""
 
         logger.debug(f"Sending PING to {port}")
         self._send_frame(CMD_PING, bytearray())
