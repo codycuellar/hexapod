@@ -12,13 +12,14 @@ from hexapod.engine import Frame, Vec3d, Vec2d, Rotation
 from hexapod.gamepad import GamePad
 from hexapod.motion_planner import MotionPlanner
 from hexapod.rigid_body import Body, Leg, LegID, LegConfig
-from hexapod.serial_comm import HexapodSerial, CommandError
+from hexapod.hexapod_serial import HexapodSerial, CommandError
 from hexapod.servos import Servo
 
+FPS = 20
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 
@@ -104,8 +105,8 @@ def main():
     # Setup serial communication with Servo2040
     hp_serial = HexapodSerial(timeout=10)
 
-    DT = 1 / 50  # Control loop frequency: 50 Hz
-    next_time = time.perf_counter()
+    DT = 1 / FPS
+    prev_time = time.perf_counter()
 
     logger.info("Starting control loop...")
 
@@ -157,22 +158,22 @@ def main():
             # Send servo commands to hardware
             servo_data = body.get_servo_angles()
             try:
-                if not hp_serial.send_servos(servo_data):
-                    logger.warning(
-                        "Failed to send servo data, will attempt reconnect..."
-                    )
+                hp_serial.send_servos(servo_data)
             except CommandError as e:
                 logger.error(f"Command failed: {e}")
                 # Could trigger reconnect or other error handling here
 
-            # Check for messages (logs, tracebacks) from Pico
-            hp_serial.check_messages()
-
-            # Maintain control loop timing
-            next_time += DT
-            sleep_time = next_time - time.perf_counter()
-            if sleep_time > 0:
-                time.sleep(sleep_time)
+            now = time.perf_counter()
+            time_left = prev_time + DT - now
+            if time_left > 0:
+                time.sleep(time_left)
+            else:
+                logger.warning(
+                    "Frame overran by %.4f ms (budget %.4f ms)",
+                    -time_left * 1000,
+                    DT * 1000,
+                )
+            prev_time = time.perf_counter()
 
     except KeyboardInterrupt:
         logger.info("Interrupted by user")

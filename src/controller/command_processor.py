@@ -33,6 +33,10 @@ class CommandProcessor:
                 return True
 
             else:
+                self._send_frame(
+                    CMD_MESSAGE,
+                    "Unknown command: 0x{:2X}".format(hex(cmd)).encode("UTF-8"),
+                )
                 log_to_file(LogLevel.WARN, "Unknown command: {}".format(chr(cmd)))
                 return False
 
@@ -46,35 +50,29 @@ class CommandProcessor:
                 pass
             return False
 
-    def _parse_servo_data(self, data: bytes):
-        """
-        Parse hex-encoded servo command data.
-
-        Format: [count_hex_pair, pin_hex_pair, angle_high_hex_pair, angle_low_hex_pair, ...]
-        Each servo takes 6 hex characters (3 bytes decoded).
-        """
-        if len(data) < 2:
+    def _parse_servo_data(self, data: bytearray):
+        if len(data) < 5:
             raise Exception("Servo data too short")
 
-        # Decode count (first 2 hex chars)
-        count = SerialBuffer.decode_hex_pair(data[0], data[1])
+        count = data[0]
 
-        # Each servo is 6 hex chars (3 decoded bytes: pin, angle_high, angle_low)
-        expected_hex_chars = 2 + count * 6
-        if len(data) != expected_hex_chars:
-            raise Exception("Invalid servo payload length: expected {} hex chars, got {}".format(
-                expected_hex_chars, len(data)
-            ))
+        count_bytes = 1
+        # Each servo data is 24b (3B)
+        servo_bytes = 3
+        expected_bytes = count_bytes + count * servo_bytes
+        if len(data) != expected_bytes:
+            raise Exception(
+                "Invalid servo payload length: expected {} hex chars, got {}".format(
+                    expected_bytes, len(data)
+                )
+            )
 
         servos = []
         for i in range(count):
-            offset = 2 + i * 6  # Skip count, then 6 chars per servo
-            pin = SerialBuffer.decode_hex_pair(data[offset], data[offset + 1])
-            high = SerialBuffer.decode_hex_pair(data[offset + 2], data[offset + 3])
-            low = SerialBuffer.decode_hex_pair(data[offset + 4], data[offset + 5])
-
+            offset = count_bytes + i * servo_bytes  # Skip count, then 6 chars per servo
+            pin = data[offset]
             # Convert from wire format: (raw / 10.0) - 90.0
-            angle_raw = (high << 8) | low
+            angle_raw = (data[offset + 1] << 8) | data[offset + 2]
             angle = float(angle_raw) / 10.0 - 90.0
             servos.append((pin, angle))
 

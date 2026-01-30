@@ -6,15 +6,18 @@ Protocol: !<CMD><LEN><DATA>
 Where:
   ! = frame start (0x21)
   CMD = single ASCII character command code
-  LEN = 2 hex ASCII digits indicating an 8 bit int for number of DATA hex chars to follow
-  DATA = hex-encoded payload (even number of hex chars)
+  LEN = 4 hex ASCII digits indicating a u16 count of DATA bytes over the wire
+  DATA = Could be UTF-8 or hex encoded ASCII, depending on CMD rules of the serial buffer.
 
 Example: !P00 (PING with 0 data bytes)
-Example: !S08010502lC (Set servo: 8 hex chars = 4 bytes of data)
-
-The parser collects raw bytes. The caller interprets whether those
-bytes are hex-encoded ASCII or not.
+Example: !S080105502C (Set servo: 8 hex chars = 4 bytes of data)
+Example: !M1BHello this is a log message (1B is 27 - len of text bytes)
 """
+
+try:
+    from commands import *
+except:
+    from .commands import *
 
 FRAME_START = ord("!")
 
@@ -22,7 +25,7 @@ FRAME_START = ord("!")
 class SerialPacket:
     __slots__ = ("cmd", "data")
 
-    def __init__(self, cmd: int, data: bytes):
+    def __init__(self, cmd: int, data: bytearray):
         self.cmd = cmd
         self.data = data
 
@@ -34,6 +37,10 @@ class SerialBuffer:
     STATE_CMD = 1
     STATE_LENGTH = 2
     STATE_DATA = 3
+
+    # 0 for raw bytes (filtered for unsafe bytes)
+    # 1 for hex-ascii
+    _COMMAND_ENCODING = {CMD_MESSAGE: 0, CMD_SET_SERVO: 1}
 
     @staticmethod
     def hex_char_to_nibble(char: int) -> int:
@@ -78,111 +85,92 @@ class SerialBuffer:
         return bytes(result)
 
     @staticmethod
-    def decode_hex_string(
-        hex_data: bytes, expected_bytes: "int | None" = None
-    ) -> bytes:
-        """
-        Decode hex-encoded ASCII string back to raw bytes.
-
-        Args:
-            hex_data: Hex-encoded ASCII bytes (e.g., b"0105A3")
-            expected_bytes: Optional expected output length for validation
-
-        Returns:
-            Decoded raw bytes
-        """
-        if len(hex_data) % 2 != 0:
-            raise ValueError("Hex string must have even length")
-
-        result = bytearray()
-        for i in range(0, len(hex_data), 2):
-            byte_val = SerialBuffer.decode_hex_pair(hex_data[i], hex_data[i + 1])
-            result.append(byte_val)
-
-        if expected_bytes is not None and len(result) != expected_bytes:
-            raise ValueError(
-                "Expected {} bytes, got {}".format(expected_bytes), len(result)
-            )
-
-        return bytes(result)
+    def u16_to_bytes(data: int):
+        return bytes([(data >> 8) & 0xFF, data & 0xFF])
 
     @staticmethod
     def build_frame(cmd: int, data: "bytes | bytearray") -> bytes:
-        """
-        Build a complete protocol frame: !<CMD><LEN><DATA>
-
-        Args:
-            cmd: Command byte (ASCII character)
-            data: Raw data bytes (will be hex-encoded automatically)
-
-        Returns:
-            Complete frame as bytes
-        """
-        # Hex-encode the data
-        hex_data = SerialBuffer.encode_bytes_as_hex(data)
-
-        # Build frame
         frame = bytearray([FRAME_START, cmd])
-        frame.extend(SerialBuffer.encode_byte_as_hex(len(hex_data)))
-        frame.extend(hex_data)
 
+        if SerialBuffer._COMMAND_ENCODING.get(cmd) == 1:
+            # Hex-encode the data
+            data = SerialBuffer.encode_bytes_as_hex(data)
+
+        len_bytes = SerialBuffer.u16_to_bytes(len(data))
+        frame.extend(SerialBuffer.encode_bytes_as_hex(len_bytes))
+        frame.extend(data)
         return bytes(frame)
 
     def __init__(self):
         self.data = bytearray()
         self.cmd = 0
-        self.len = 0  # Number of hex character bytes to read (not decoded byte count!)
-        self.bytes_left = 0
+        self.packet_len = 0
+        self.data_len = 0
+        self.packet_bytes_left = 0
+        self.prev_hex_char = 0
         self.state = self.STATE_WAITING
 
     def feed(self, byte: int):
         """
-        Feed one byte into the parser.
-        Returns SerialPacket when complete, None otherwise.
+        Feed one byte into the parser. If this byte completes the packet, we return
+        the SerialPacket, which is the ASCII hex encoded bytestream.
         """
-        if byte == FRAME_START:
-            self._reset()
-            self._set_state(self.STATE_CMD)
-            return None
+        if self.state == self.STATE_WAITING:
+            if byte == FRAME_START:
+                self._reset()
+                self._set_state(self.STATE_CMD)
 
-        if self.state == self.STATE_CMD:
+        elif self.state == self.STATE_CMD:
             self.cmd = byte
-            self.bytes_left = 2  # Expect 2 hex chars for length
+            self.packet_bytes_left = 4  # Expect 2 hex chars for length
             self._set_state(self.STATE_LENGTH)
-            return None
 
-        if self.state == self.STATE_LENGTH:
-            if self.bytes_left == 2:
-                # First hex char of length
-                self.len = byte
-                self.bytes_left = 1
-                return None
-            elif self.bytes_left == 1:
-                # Second hex char of length - decode it
-                self.len = self.decode_hex_pair(self.len, byte)
+        elif self.state == self.STATE_LENGTH:
+            nibble = self.hex_char_to_nibble(byte)
+            self.packet_len = self.packet_len << 4 | nibble
+            self.packet_bytes_left -= 1
+
+            if self.packet_bytes_left == 0:
                 # Now self.len is the number of hex character bytes to read
-                self.bytes_left = self.len
-                self._set_state(self.STATE_DATA)
                 # If length is 0, packet is complete immediately
-                if self.bytes_left == 0:
-                    packet = SerialPacket(self.cmd, bytes(self.data))
+                if self.packet_len == 0:
+                    packet = SerialPacket(self.cmd, bytearray())
                     self._reset()
                     self._set_state(self.STATE_WAITING)
                     return packet
-                return None
+                else:
+                    if self._COMMAND_ENCODING.get(self.cmd) == 1:
+                        self.data_len = self.packet_len // 2
+                    else:
+                        self.data_len = self.packet_len
+                    self.packet_bytes_left = self.packet_len
+                    self._set_state(self.STATE_DATA)
 
         elif self.state == self.STATE_DATA:
-            # Read hex character bytes (the actual ASCII hex digits)
-            self.data.append(byte)
-            self.bytes_left -= 1
+            if self._COMMAND_ENCODING.get(self.cmd) == 1:
+                if self.packet_bytes_left % 2 == 0:
+                    self.prev_hex_char = byte
+                else:
+                    self.data.append(
+                        SerialBuffer.decode_hex_pair(self.prev_hex_char, byte)
+                    )
+            else:
+                self.data.append(byte)
+
+            self.packet_bytes_left -= 1
+
             # Check if packet is complete after reading this byte
-            if self.bytes_left == 0:
-                packet = SerialPacket(self.cmd, bytes(self.data))
+            if self.packet_bytes_left == 0:
+                if self.data_len != len(self.data):
+                    raise ValueError(
+                        "Packet bytes len {} does not match header length {}".format(
+                            len(self.data), self.data_len
+                        )
+                    )
+                packet = SerialPacket(self.cmd, self.data)
                 self._reset()
                 self._set_state(self.STATE_WAITING)
                 return packet
-
-        return None
 
     def _set_state(self, state: int):
         self.state = state
@@ -190,6 +178,8 @@ class SerialBuffer:
     def _reset(self):
         self.data = bytearray()
         self.cmd = 0
-        self.len = 0
-        self.bytes_left = 0
+        self.packet_len = 0
+        self.data_len = 0
+        self.prev_hex_char = 0
+        self.packet_bytes_left = 0
         self.state = self.STATE_WAITING
