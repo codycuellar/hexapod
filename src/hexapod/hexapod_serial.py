@@ -119,6 +119,8 @@ class HexapodSerial:
             packet = self._read_available()
             if packet and packet.cmd == cmd:
                 return packet
+            elif packet:
+                logger.info(f"Received unknown packet {packet.cmd}, wanted {cmd}")
         logger.error(f"Did not receive a servo command response after {timeout}s")
 
     def _read_available(self) -> SerialPacket | None:

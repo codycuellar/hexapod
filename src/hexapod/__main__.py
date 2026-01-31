@@ -100,7 +100,7 @@ def main():
 
     logger.info("Initializing gamepad...")
     gamepad = GamePad()
-    gamepad.start_reading()
+    # gamepad.start_reading()
 
     # Setup serial communication with Servo2040
     hp_serial = HexapodSerial(connect_timeout=10)

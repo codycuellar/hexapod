@@ -24,7 +24,9 @@ def main():
 
     log_to_file(LogLevel.INFO, "Initializing LEDs")
     receive_data_led_timeout = 1000 # ms
+    led_idle_time = 1000 * 60
     LED_RUNNING = (0, LEDSolid(LEDColor("blue", 1.0, 0.25)))
+    LED_IDLE = (0, LEDSolid(LEDColor("yellow", 1.0, 0.2)))
     LED_RCV_DATA = (1, LEDBlink(LEDColor("green", 1.0, 0.2), 0.3))
     LED_NO_DATA = (1, LEDOff())
     LED_ERROR = (2, LEDPulse(LEDColor("red", 1.0, 1.0), 3.0))
@@ -40,6 +42,9 @@ def main():
 
     led_manager.set_effect(*LED_RUNNING)
     log_to_file(LogLevel.INFO, "Entering main loop")
+
+    short_idle = True
+    long_idle = True
     try:
         while True:
             now = utime.ticks_ms()
@@ -56,6 +61,8 @@ def main():
                     try:
                         packet = serial_buffer.feed(byte)
                         if packet:
+                            short_idle = False
+                            long_idle = False
                             last_rx = now
                             led_manager.set_effect(*LED_RCV_DATA)
 
@@ -64,14 +71,20 @@ def main():
                                 led_manager.set_effect(*LED_ERROR)
                             break
                     except Exception as e:
+                        led_manager.set_effect(*LED_ERROR)
                         log_to_file(LogLevel.WARN, e)
                         break
 
             # Update LED status based on time since last RX
             diff = utime.ticks_diff(now, last_rx)
-            if diff > receive_data_led_timeout:
+            if not short_idle and diff > receive_data_led_timeout:
+                short_idle = True
                 log_to_file(LogLevel.INFO, "Have not received data in {}ms".format(diff))
                 led_manager.set_effect(*LED_NO_DATA)
+            if not long_idle and diff > led_idle_time:
+                long_idle = True
+                log_to_file(LogLevel.INFO, "Have not received data in {}ms, going idle".format(diff))
+                led_manager.set_effect(*LED_IDLE)
     except Exception as e:
         log_to_file(LogLevel.FATAL, e)
     finally:
