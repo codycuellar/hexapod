@@ -23,8 +23,9 @@ def main():
     cluster = ServoCluster(0, 0, pins)
 
     log_to_file(LogLevel.INFO, "Initializing LEDs")
+    receive_data_led_timeout = 1000 # ms
     LED_RUNNING = (0, LEDSolid(LEDColor("blue", 1.0, 0.25)))
-    LED_RCV_DATA = (1, LEDBlink(LEDColor("green", 1.0, 0.2), 0.2))
+    LED_RCV_DATA = (1, LEDBlink(LEDColor("green", 1.0, 0.2), 0.3))
     LED_NO_DATA = (1, LEDOff())
     LED_ERROR = (2, LEDPulse(LEDColor("red", 1.0, 1.0), 3.0))
     led_manager = LedManager(1, 0)
@@ -67,7 +68,9 @@ def main():
                         break
 
             # Update LED status based on time since last RX
-            if utime.ticks_diff(now, last_rx) > 1000:
+            diff = utime.ticks_diff(now, last_rx)
+            if diff > receive_data_led_timeout:
+                log_to_file(LogLevel.INFO, "Have not received data in {}ms".format(diff))
                 led_manager.set_effect(*LED_NO_DATA)
     except Exception as e:
         log_to_file(LogLevel.FATAL, e)

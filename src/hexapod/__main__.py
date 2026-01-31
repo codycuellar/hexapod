@@ -149,7 +149,7 @@ def main():
                 gait_turn = trigger_turn
 
             # Update motion planner
-            motion_planner.update_gait(DT, gait_vec, gait_turn)
+            motion_planner.update_gait(DT, Vec2d(0.0, 1.0), gait_turn)
             motion_planner.offset_body(DT, body_offset_trans, body_offset_rot)
             motion_planner.step(DT)
 
