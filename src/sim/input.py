@@ -4,7 +4,11 @@ Simple 2D gamepad input visualization.
 Shows left/right joystick positions as dots, trigger levels as side bars,
 and on/off indicators for bumpers, face buttons (A/B/X/Y), L3/R3, and D-pad.
 Run with: python -m sim.input
+
+Set SIM_INPUT_FPS (default 15) for update rate; lower = less CPU (e.g. 10 on Pi).
 """
+
+import os
 
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -12,25 +16,24 @@ import matplotlib.patches as mpatches
 
 from hexapod.gamepad import get_controller
 
-# Button names and display labels (use button_held)
+# (getter returns held for display, label, color)
 BUTTONS = [
-    ("bumper_l", "L1", "tab:blue"),
-    ("a", "A", "tab:green"),
-    ("b", "B", "tab:red"),
-    ("x", "X", "tab:purple"),
-    ("y", "Y", "tab:olive"),
-    ("bumper_r", "R1", "tab:orange"),
-    ("l3", "L3", "tab:cyan"),
-    ("r3", "R3", "tab:pink"),
+    (lambda g: g.get_bumper_l()[1], "BL", "tab:blue"),
+    (lambda g: g.get_btn_south()[1], "S", "tab:green"),
+    (lambda g: g.get_btn_east()[1], "E", "tab:red"),
+    (lambda g: g.get_btn_west()[1], "W", "tab:purple"),
+    (lambda g: g.get_btn_north()[1], "N", "tab:olive"),
+    (lambda g: g.get_bumper_r()[1], "BR", "tab:orange"),
+    (lambda g: g.get_joy_l_click()[1], "JL", "tab:cyan"),
+    (lambda g: g.get_joy_r_click()[1], "JR", "tab:pink"),
 ]
 
-# D-pad: (label, color, getter) - dpad uses live values
-DPAD_THRESHOLD = 0.3
+# D-pad: (getter, label, color)
 DPAD_BUTTONS = [
-    ("U", "tab:gray", lambda g: g.dpad.y > DPAD_THRESHOLD),
-    ("D", "tab:gray", lambda g: g.dpad.y < -DPAD_THRESHOLD),
-    ("L", "tab:gray", lambda g: g.dpad.x < -DPAD_THRESHOLD),
-    ("R", "tab:gray", lambda g: g.dpad.x > DPAD_THRESHOLD),
+    (lambda g: g.get_dpad_up()[1], "DU", "tab:gray"),
+    (lambda g: g.get_dpad_down()[1], "DD", "tab:gray"),
+    (lambda g: g.get_dpad_left()[1], "DL", "tab:gray"),
+    (lambda g: g.get_dpad_right()[1], "DR", "tab:gray"),
 ]
 
 
@@ -38,8 +41,14 @@ def main() -> None:
     gamepad = get_controller()
     gamepad.start_reading()
 
+    try:
+        fps = float(os.environ.get("SIM_INPUT_FPS", "15"))
+    except ValueError:
+        fps = 15.0
+    interval_s = 1.0 / max(fps, 5.0)  # clamp min 5 fps
+
     plt.ion()
-    fig = plt.figure(figsize=(8, 6), layout="constrained")
+    fig = plt.figure(figsize=(6, 4.5), layout="constrained")
     gs = gridspec.GridSpec(
         3, 3,
         figure=fig,
@@ -88,10 +97,9 @@ def main() -> None:
     ax_btns.axis("off")
     patches = []
     for i, (name, label, color) in enumerate(BUTTONS):
-        rect = mpatches.FancyBboxPatch(
+        rect = mpatches.Rectangle(
             (i + 0.1, -0.35), 0.8, 0.7,
-            boxstyle="round,pad=0.02", linewidth=1.5,
-            edgecolor=color, facecolor="white",
+            linewidth=1.5, edgecolor=color, facecolor="white",
             clip_on=False,
         )
         ax_btns.add_patch(rect)
@@ -105,11 +113,10 @@ def main() -> None:
     ax_dpad.set_ylim(-0.5, 0.5)
     ax_dpad.axis("off")
     dpad_patches = []
-    for i, (label, color, _) in enumerate(DPAD_BUTTONS):
-        rect = mpatches.FancyBboxPatch(
+    for i, (getter, label, color) in enumerate(DPAD_BUTTONS):
+        rect = mpatches.Rectangle(
             (i + 0.1, -0.35), 0.8, 0.7,
-            boxstyle="round,pad=0.02", linewidth=1.5,
-            edgecolor=color, facecolor="white",
+            linewidth=1.5, edgecolor=color, facecolor="white",
             clip_on=False,
         )
         ax_dpad.add_patch(rect)
@@ -122,16 +129,18 @@ def main() -> None:
 
     try:
         while plt.fignum_exists(fig.number):
-            dot_l.set_data([gamepad.joy_l.x], [gamepad.joy_l.y])
-            dot_r.set_data([gamepad.joy_r.x], [gamepad.joy_r.y])
-            bar_l.set_height(gamepad.trigger_l)
-            bar_r.set_height(gamepad.trigger_r)
-            for (rect, color), (name, _, _) in zip(patches, BUTTONS):
-                rect.set_facecolor(color if gamepad.button_held(name) else "white")
-            for (rect, color), (_, _, getter) in zip(dpad_patches, DPAD_BUTTONS):
+            joy_l = gamepad.get_joy_l()
+            joy_r = gamepad.get_joy_r()
+            dot_l.set_data([joy_l.x], [joy_l.y])
+            dot_r.set_data([joy_r.x], [joy_r.y])
+            bar_l.set_height(gamepad.get_trigger_l())
+            bar_r.set_height(gamepad.get_trigger_r())
+            for (rect, color), (getter, _, _) in zip(patches, BUTTONS):
+                rect.set_facecolor(color if getter(gamepad) else "white")
+            for (rect, color), (getter, _, _) in zip(dpad_patches, DPAD_BUTTONS):
                 rect.set_facecolor(color if getter(gamepad) else "white")
             fig.canvas.draw_idle()
-            plt.pause(0.03)
+            plt.pause(interval_s)
     except KeyboardInterrupt:
         pass
     finally:

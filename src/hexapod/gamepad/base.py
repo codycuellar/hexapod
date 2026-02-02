@@ -2,13 +2,14 @@
 Base gamepad interface for hexapod control.
 
 All controller implementations (Xbox, DS4, etc.) inherit from Gamepad and expose
-the same properties. A background thread updates these properties; the main
-event loop reads current values only.
+the same unified API. A background thread updates state; the main loop reads
+via get_* methods.
 
-- Joysticks, triggers, dpad: live snapshot; read current value anytime.
-- Buttons (bumpers, thumbstick clicks, face): discrete on/off. Use button_held(name)
-  for current state (e.g. modifier keys) and consume_button(name) for one-shot
-  press events so a fixed-interval loop does not miss a press.
+- Joysticks, triggers: get_joy_l(), get_joy_r(), get_trigger_l(), get_trigger_r()
+- Buttons: get_bumper_l(), get_btn_north(), etc. Each returns (hit, held) where
+  hit=True if pressed since last get (consumed), held=True if currently down.
+  State changes (press/release) are queued so rapid release+press between frames
+  still shows the release for one frame before the press.
 """
 
 from abc import ABC, abstractmethod
@@ -23,8 +24,7 @@ class Gamepad(ABC):
     Common interface for gamepad input.
 
     Subclasses run a read loop in a daemon thread and update instance
-    attributes. The main script reads joy_l, joy_r, triggers, dpad on each
-    tick. For discrete buttons, use button_held(name) or consume_button(name).
+    attributes. Read state via get_joy_*(), get_trigger_*(), get_bumper_*(), etc.
     """
 
     JOY_DEADZONE = 0.15
@@ -39,7 +39,7 @@ class Gamepad(ABC):
         self.trigger_r = 0.0
         self._stop = False
         self._read_thread: threading.Thread | None = None
-        self._button_pending: dict[str, bool] = {}
+        self._button_queue: dict[str, list[bool]] = {}
         self._button_held: dict[str, bool] = {}
         self._button_lock = threading.Lock()
 
@@ -60,30 +60,96 @@ class Gamepad(ABC):
         if self._read_thread is not None and self._read_thread.is_alive():
             self._read_thread.join(timeout=timeout)
 
-    def button_held(self, name: str) -> bool:
-        """Return True if the button is currently held (e.g. modifier keys)."""
-        with self._button_lock:
-            return self._button_held.get(name, False)
+    # --- Continuous inputs ---
 
-    def consume_button(self, name: str) -> bool:
-        """
-        Return True if the button had a press since last consume, and clear it.
+    def get_joy_l(self) -> Vec2d:
+        """Left joystick position, [-1, 1] per axis with deadzone."""
+        return self.joy_l
 
-        Use for one-shot actions (e.g. A = dance) so you do not miss a press
-        between event loop ticks, and so multiple rapid presses do not queue.
+    def get_joy_r(self) -> Vec2d:
+        """Right joystick position, [-1, 1] per axis with deadzone."""
+        return self.joy_r
+
+    def get_trigger_l(self) -> float:
+        """Left trigger, 0.0 to 1.0."""
+        return self.trigger_l
+
+    def get_trigger_r(self) -> float:
+        """Right trigger, 0.0 to 1.0."""
+        return self.trigger_r
+
+    # --- Discrete buttons: each returns (hit, held) ---
+
+    def _get_button(self, name: str) -> tuple[bool, bool]:
+        """
+        Return (hit, held) for a button. State changes are queued so rapid
+        release+press between frames shows the release for one frame first.
         """
         with self._button_lock:
-            return self._button_pending.pop(name, False)
+            queue = self._button_queue.setdefault(name, [])
+            if queue:
+                state = queue.pop(0)
+                return (state, state)
+            return (False, self._button_held.get(name, False))
+
+    def get_bumper_l(self) -> tuple[bool, bool]:
+        """Left bumper. Returns (hit, held)."""
+        return self._get_button("bumper_l")
+
+    def get_bumper_r(self) -> tuple[bool, bool]:
+        """Right bumper. Returns (hit, held)."""
+        return self._get_button("bumper_r")
+
+    def get_btn_north(self) -> tuple[bool, bool]:
+        """North face button (Y/Triangle). Returns (hit, held)."""
+        return self._get_button("btn_north")
+
+    def get_btn_south(self) -> tuple[bool, bool]:
+        """South face button (A/Cross). Returns (hit, held)."""
+        return self._get_button("btn_south")
+
+    def get_btn_east(self) -> tuple[bool, bool]:
+        """East face button (B/Circle). Returns (hit, held)."""
+        return self._get_button("btn_east")
+
+    def get_btn_west(self) -> tuple[bool, bool]:
+        """West face button (X/Square). Returns (hit, held)."""
+        return self._get_button("btn_west")
+
+    def get_dpad_up(self) -> tuple[bool, bool]:
+        """D-pad up. Returns (hit, held)."""
+        return self._get_button("dpad_up")
+
+    def get_dpad_down(self) -> tuple[bool, bool]:
+        """D-pad down. Returns (hit, held)."""
+        return self._get_button("dpad_down")
+
+    def get_dpad_left(self) -> tuple[bool, bool]:
+        """D-pad left. Returns (hit, held)."""
+        return self._get_button("dpad_left")
+
+    def get_dpad_right(self) -> tuple[bool, bool]:
+        """D-pad right. Returns (hit, held)."""
+        return self._get_button("dpad_right")
+
+    def get_joy_l_click(self) -> tuple[bool, bool]:
+        """Left stick click (L3). Returns (hit, held)."""
+        return self._get_button("joy_l_click")
+
+    def get_joy_r_click(self) -> tuple[bool, bool]:
+        """Right stick click (R3). Returns (hit, held)."""
+        return self._get_button("joy_r_click")
 
     def _record_button_press(self, name: str) -> None:
-        """Subclasses call on press (0->1). At most one pending per name until consumed."""
+        """Subclasses call on press (0->1). Appends to queue for ordered reporting."""
         with self._button_lock:
-            self._button_pending[name] = True
+            self._button_queue.setdefault(name, []).append(True)
             self._button_held[name] = True
 
     def _record_button_release(self, name: str) -> None:
-        """Subclasses call on release (1->0)."""
+        """Subclasses call on release (1->0). Appends to queue for ordered reporting."""
         with self._button_lock:
+            self._button_queue.setdefault(name, []).append(False)
             self._button_held[name] = False
 
     @abstractmethod

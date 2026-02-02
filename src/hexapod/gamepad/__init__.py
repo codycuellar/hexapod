@@ -1,45 +1,38 @@
 """
-Gamepad: common interface and controller implementations.
+Unified gamepad interface for hexapod control.
 
-Use get_controller(name) to obtain the right controller for your platform or config.
+Use get_controller() to obtain a controller instance (Xbox or DS4).
+Read state via get_joy_*(), get_trigger_*(), get_bumper_*(), etc.
 """
 
 import os
 
 from hexapod.gamepad.base import Gamepad
-from hexapod.gamepad.ds4 import DS4Controller
 from hexapod.gamepad.xbox import XboxController
-
-# Map name -> class for get_controller()
-_CONTROLLERS: dict[str, type[Gamepad]] = {
-    "xbox": XboxController,
-    "ds4": DS4Controller,
-}
+from hexapod.gamepad.ds4 import DS4Controller
 
 
 def get_controller(name: str | None = None, **kwargs: object) -> Gamepad:
     """
-    Return a gamepad instance for the given name.
+    Return a gamepad controller instance.
 
     Args:
-        name: One of "xbox", "ds4", or None.
-              If None, uses env var GAMEPAD if set, otherwise "xbox".
-        **kwargs: Passed to the controller constructor (e.g. interface="/dev/input/js1" for DS4).
-
-    Returns:
-        A Gamepad subclass instance (not yet started; call start_reading()).
+        name: "xbox" or "ds4". If None, uses GAMEPAD env var or defaults to "xbox".
+        **kwargs: Passed to controller constructor (e.g. interface="/dev/input/js0" for DS4).
     """
-    key = (name or os.environ.get("GAMEPAD", "xbox")).strip().lower()
-    if key not in _CONTROLLERS:
-        raise ValueError(
-            f"Unknown gamepad '{key}'. Known: {', '.join(_CONTROLLERS)}"
-        )
-    return _CONTROLLERS[key](**kwargs)
+    if name is None:
+        name = os.environ.get("GAMEPAD", "xbox")
+    name = name.lower()
+    if name == "xbox":
+        return XboxController(**kwargs)
+    if name == "ds4":
+        return DS4Controller(**kwargs)
+    raise ValueError(f"Unknown controller: {name}")
 
 
 __all__ = [
-    "DS4Controller",
     "Gamepad",
     "XboxController",
+    "DS4Controller",
     "get_controller",
 ]

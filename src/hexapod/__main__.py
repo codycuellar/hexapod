@@ -124,24 +124,26 @@ def main():
             body_offset_rot = Vec3d()  # pitch, roll, yaw
 
             # LEFT STICK
-            if gamepad.button_held("bumper_l"):
-                body_offset_trans = gamepad.joy_l.to_3d()
+            _, bumper_l_held = gamepad.get_bumper_l()
+            if bumper_l_held:
+                body_offset_trans = gamepad.get_joy_l().to_3d()
             else:
-                gait_vec = gamepad.joy_l
+                gait_vec = gamepad.get_joy_l()
 
             # RIGHT STICK
-            if gamepad.button_held("bumper_l"):
+            if bumper_l_held:
                 body_offset_trans = Vec3d(
-                    body_offset_trans.x, body_offset_trans.y, gamepad.joy_r.y
+                    body_offset_trans.x, body_offset_trans.y, gamepad.get_joy_r().y
                 )
             else:
                 body_offset_rot = Vec3d(
-                    -gamepad.joy_r.y, gamepad.joy_r.x, body_offset_rot.z
+                    -gamepad.get_joy_r().y, gamepad.get_joy_r().x, body_offset_rot.z
                 )
 
             # TRIGGERS
-            trigger_turn = gamepad.trigger_l - gamepad.trigger_r
-            if gamepad.button_held("bumper_r"):
+            trigger_turn = gamepad.get_trigger_l() - gamepad.get_trigger_r()
+            _, bumper_r_held = gamepad.get_bumper_r()
+            if bumper_r_held:
                 body_offset_rot = Vec3d(
                     body_offset_rot.x, body_offset_rot.y, trigger_turn
                 )
@@ -177,6 +179,7 @@ def main():
         logger.info("Interrupted by user")
     finally:
         logger.info("Shutting down...")
+        gamepad.stop_reading()
         hp_serial.close()
         logger.info("Shutdown complete")
 

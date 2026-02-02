@@ -215,24 +215,26 @@ def main():
             body_rotation_cmd = Vec3d()  # pitch, roll, yaw
 
             # LEFT STICK
-            if gamepad.button_held("bumper_l"):
-                body_translation_cmd = gamepad.joy_l.to_3d()
+            _, bumper_l_held = gamepad.get_bumper_l()
+            if bumper_l_held:
+                body_translation_cmd = gamepad.get_joy_l().to_3d()
             else:
-                gait_vec = gamepad.joy_l
+                gait_vec = gamepad.get_joy_l()
 
             # RIGHT STICK
-            if gamepad.button_held("bumper_l"):
+            if bumper_l_held:
                 body_translation_cmd = Vec3d(
-                    body_translation_cmd.x, body_translation_cmd.y, gamepad.joy_r.y
+                    body_translation_cmd.x, body_translation_cmd.y, gamepad.get_joy_r().y
                 )
             else:
                 body_rotation_cmd = Vec3d(
-                    -gamepad.joy_r.y, gamepad.joy_r.x, body_rotation_cmd.z
+                    -gamepad.get_joy_r().y, gamepad.get_joy_r().x, body_rotation_cmd.z
                 )
 
             # TRIGGERS
-            trigger_turn = gamepad.trigger_l - gamepad.trigger_r
-            if gamepad.button_held("bumper_r"):
+            trigger_turn = gamepad.get_trigger_l() - gamepad.get_trigger_r()
+            _, bumper_r_held = gamepad.get_bumper_r()
+            if bumper_r_held:
                 body_rotation_cmd = Vec3d(
                     body_rotation_cmd.x, body_rotation_cmd.y, trigger_turn
                 )
@@ -265,6 +267,8 @@ def main():
 
     except KeyboardInterrupt:
         logger.info("Visualization interrupted by user")
+    finally:
+        gamepad.stop_reading()
 
 
 if __name__ == "__main__":
