@@ -7,6 +7,7 @@ Run with: python -m sim.input
 
 Options:
   --no-matplotlib  Skip visualization; only print values and FPS (faster on Pi).
+  --raw            Print raw joystick integers instead of scaled floats (for debugging).
   --fps N          Target FPS (default 15). Overrides SIM_INPUT_FPS env.
 """
 
@@ -47,6 +48,11 @@ def _parse_args() -> argparse.Namespace:
         help="Skip visualization; only print values and FPS (faster on Pi).",
     )
     parser.add_argument(
+        "--raw",
+        action="store_true",
+        help="Print raw joystick integers instead of scaled floats (for debugging).",
+    )
+    parser.add_argument(
         "--fps",
         type=float,
         default=None,
@@ -55,15 +61,30 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _print_status(joy_l, joy_r, tl: float, tr: float, fps: float) -> None:
-    line = (
-        f"L: ({joy_l.x: 6.2f}, {joy_l.y: 6.2f}) R: ({joy_r.x: 6.2f}, {joy_r.y: 6.2f}) "
-        f"LT: {tl:5.2f} RT: {tr:5.2f} FPS: {int(fps):3d}"
-    )
+def _print_status(
+    joy_l,
+    joy_r,
+    tl: float,
+    tr: float,
+    fps: float,
+    raw: bool = False,
+) -> None:
+    if raw:
+        line = (
+            f"L: ({int(joy_l.x):6d}, {int(joy_l.y):6d}) R: ({int(joy_r.x):6d}, {int(joy_r.y):6d}) "
+            f"LT: {tl:5.2f} RT: {tr:5.2f} FPS: {int(fps):3d}"
+        )
+    else:
+        line = (
+            f"L: ({joy_l.x: 6.2f}, {joy_l.y: 6.2f}) R: ({joy_r.x: 6.2f}, {joy_r.y: 6.2f}) "
+            f"LT: {tl:5.2f} RT: {tr:5.2f} FPS: {int(fps):3d}"
+        )
     print(f"\r{line}\033[K", end="", flush=True)
 
 
-def _run_without_matplotlib(gamepad, interval_s: float) -> None:
+def _run_without_matplotlib(
+    gamepad, interval_s: float, raw: bool = False
+) -> None:
     """Text-only loop (no matplotlib overhead)."""
     prev_time = time.perf_counter()
     try:
@@ -78,13 +99,15 @@ def _run_without_matplotlib(gamepad, interval_s: float) -> None:
             fps = 1.0 / dt if dt > 0 else 0.0
             prev_time = now
 
-            _print_status(joy_l, joy_r, tl, tr, fps)
+            _print_status(joy_l, joy_r, tl, tr, fps, raw=raw)
             time.sleep(interval_s)
     except KeyboardInterrupt:
         pass
 
 
-def _run_with_matplotlib(gamepad, interval_s: float) -> None:
+def _run_with_matplotlib(
+    gamepad, interval_s: float, raw: bool = False
+) -> None:
     """Full visualization with matplotlib."""
     import matplotlib.gridspec as gridspec
     import matplotlib.patches as mpatches
@@ -187,7 +210,7 @@ def _run_with_matplotlib(gamepad, interval_s: float) -> None:
             dt = now - prev_time
             fps = 1.0 / dt if dt > 0 else 0.0
             prev_time = now
-            _print_status(joy_l, joy_r, tl, tr, fps)
+            _print_status(joy_l, joy_r, tl, tr, fps, raw=raw)
     except KeyboardInterrupt:
         pass
     finally:
@@ -208,13 +231,14 @@ def main() -> None:
     interval_s = 1.0 / max(fps, 5.0)
 
     gamepad = get_controller()
+    gamepad.set_raw_joy(args.raw)
     gamepad.start_reading()
 
     try:
         if args.no_matplotlib:
-            _run_without_matplotlib(gamepad, interval_s)
+            _run_without_matplotlib(gamepad, interval_s, raw=args.raw)
         else:
-            _run_with_matplotlib(gamepad, interval_s)
+            _run_with_matplotlib(gamepad, interval_s, raw=args.raw)
     finally:
         print()
         gamepad.stop_reading()

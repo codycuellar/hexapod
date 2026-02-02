@@ -42,6 +42,11 @@ class Gamepad(ABC):
         self._button_queue: dict[str, list[bool]] = {}
         self._button_held: dict[str, bool] = {}
         self._button_lock = threading.Lock()
+        self._raw_joy = False
+
+    def set_raw_joy(self, enabled: bool) -> None:
+        """When True, _scale_joy returns raw values (no deadzone). For debugging."""
+        self._raw_joy = enabled
 
     def start_reading(self) -> None:
         """Start the background thread that continuously updates gamepad state."""
@@ -161,7 +166,9 @@ class Gamepad(ABC):
         ...
 
     def _scale_joy(self, val: float) -> float:
-        """Scale raw axis to [-1, 1] with deadzone."""
+        """Scale raw axis to [-1, 1] with deadzone. No-op when set_raw_joy(True)."""
+        if self._raw_joy:
+            return float(val)
         scaled = val / self.JOY_MAX
         if abs(scaled) < self.JOY_DEADZONE:
             return 0.0

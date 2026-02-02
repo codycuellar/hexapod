@@ -33,6 +33,9 @@ class DS4Controller(Gamepad):
     via get_bumper_*(), get_btn_*(), get_dpad_*(), get_joy_*_click().
     """
 
+    # DS4 often has center drift; use larger deadzone than Xbox
+    JOY_DEADZONE = 0.2
+
     def __init__(self, interface: str = "/dev/input/js0") -> None:
         super().__init__()
         self.interface = interface
