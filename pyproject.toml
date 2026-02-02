@@ -18,7 +18,7 @@ dependencies = []
 [project.optional-dependencies]
 controller = []
 hexapod = ["inputs>=0.5", "pyserial>=3.5"]
-sim = ["matplotlib>=3.10.1"]
+sim = ["matplotlib>=3.10.1", "inputs>=0.5"]
 dev = ["mpremote>=1.22.0"]
 
 [project.scripts]

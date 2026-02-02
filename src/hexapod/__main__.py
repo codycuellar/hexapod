@@ -9,7 +9,7 @@ import time
 import logging
 
 from hexapod.engine import Frame, Vec3d, Vec2d, Rotation
-from hexapod.gamepad import GamePad
+from hexapod.gamepad import get_controller
 from hexapod.motion_planner import MotionPlanner
 from hexapod.rigid_body import Body, Leg, LegID, LegConfig
 from hexapod.hexapod_serial import HexapodSerial, CommandError
@@ -99,8 +99,8 @@ def main():
     motion_planner.initialize()
 
     logger.info("Initializing gamepad...")
-    gamepad = GamePad()
-    # gamepad.start_reading()
+    gamepad = get_controller()  # uses GAMEPAD env or "xbox"
+    gamepad.start_reading()
 
     # Setup serial communication with Servo2040
     hp_serial = HexapodSerial(connect_timeout=10)
@@ -124,13 +124,13 @@ def main():
             body_offset_rot = Vec3d()  # pitch, roll, yaw
 
             # LEFT STICK
-            if gamepad.bumper_l:
+            if gamepad.button_held("bumper_l"):
                 body_offset_trans = gamepad.joy_l.to_3d()
             else:
                 gait_vec = gamepad.joy_l
 
             # RIGHT STICK
-            if gamepad.bumper_l:
+            if gamepad.button_held("bumper_l"):
                 body_offset_trans = Vec3d(
                     body_offset_trans.x, body_offset_trans.y, gamepad.joy_r.y
                 )
@@ -141,7 +141,7 @@ def main():
 
             # TRIGGERS
             trigger_turn = gamepad.trigger_l - gamepad.trigger_r
-            if gamepad.bumper_r:
+            if gamepad.button_held("bumper_r"):
                 body_offset_rot = Vec3d(
                     body_offset_rot.x, body_offset_rot.y, trigger_turn
                 )

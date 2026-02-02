@@ -12,7 +12,7 @@ import logging
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
 
-from hexapod.gamepad import GamePad
+from hexapod.gamepad import get_controller
 from hexapod.rigid_body import Body, Leg, LegID, LegConfig
 from hexapod.engine import Frame, Vec3d, Vec2d, Rotation, Transform
 from hexapod.servos import Servo
@@ -170,7 +170,7 @@ def main():
     logger.info("Creating hexapod for visualization...")
     body = create_simulation_hexapod()
 
-    gamepad = GamePad()
+    gamepad = get_controller()
     gamepad.start_reading()
 
     logger.info("Creating motion planner for visualization...")
@@ -215,13 +215,13 @@ def main():
             body_rotation_cmd = Vec3d()  # pitch, roll, yaw
 
             # LEFT STICK
-            if gamepad.bumper_l:
+            if gamepad.button_held("bumper_l"):
                 body_translation_cmd = gamepad.joy_l.to_3d()
             else:
                 gait_vec = gamepad.joy_l
 
             # RIGHT STICK
-            if gamepad.bumper_l:
+            if gamepad.button_held("bumper_l"):
                 body_translation_cmd = Vec3d(
                     body_translation_cmd.x, body_translation_cmd.y, gamepad.joy_r.y
                 )
@@ -232,7 +232,7 @@ def main():
 
             # TRIGGERS
             trigger_turn = gamepad.trigger_l - gamepad.trigger_r
-            if gamepad.bumper_r:
+            if gamepad.button_held("bumper_r"):
                 body_rotation_cmd = Vec3d(
                     body_rotation_cmd.x, body_rotation_cmd.y, trigger_turn
                 )
