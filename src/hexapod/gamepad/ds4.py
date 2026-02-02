@@ -54,7 +54,8 @@ class DS4Controller(Gamepad):
                 if value == 0:
                     self.joy_l = Vec2d(self.joy_l.x, 0.0)
                 else:
-                    self.joy_l = Vec2d(self.joy_l.x, -self._scale_joy(value))
+                    s = self._scale_joy(value)
+                    self.joy_l = Vec2d(self.joy_l.x, 0.0 if s == 0 else -s)
             elif btn == 2:  # L2
                 if value == -32767:
                     self.trigger_l = 0.0
@@ -69,7 +70,8 @@ class DS4Controller(Gamepad):
                 if value == 0:
                     self.joy_r = Vec2d(self.joy_r.x, 0.0)
                 else:
-                    self.joy_r = Vec2d(self.joy_r.x, -self._scale_joy(value))
+                    s = self._scale_joy(value)
+                    self.joy_r = Vec2d(self.joy_r.x, 0.0 if s == 0 else -s)
             elif btn == 5:  # R2
                 if value == -32767:
                     self.trigger_r = 0.0
