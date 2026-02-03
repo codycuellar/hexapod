@@ -76,7 +76,7 @@ def _print_status(
         )
     else:
         line = (
-            f"L: ({joy_l.x: 6.2f}, {joy_l.y: 6.2f}) R: ({joy_r.x: 6.2f}, {joy_r.y: 6.2f}) "
+            f"L: ({joy_l.x: 6.4f}, {joy_l.y: 6.4f}) R: ({joy_r.x: 6.4f}, {joy_r.y: 6.4f}) "
             f"LT: {tl:5.2f} RT: {tr:5.2f} FPS: {int(fps):3d}"
         )
     print(f"\r{line}\033[K", end="", flush=True)
