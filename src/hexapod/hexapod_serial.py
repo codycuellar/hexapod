@@ -30,6 +30,7 @@ class HexapodSerial:
 
     def connect(self):
         """Attempts to find and connect to the hexapod servo2040 board."""
+        logger.info("Connecting to servo2040 board...")
         start_time = time.time()
         while time.time() - start_time < self.timeout:
             for port in self.ports:
@@ -113,7 +114,7 @@ class HexapodSerial:
         self.conn.write(frame)
         self.conn.flush()
 
-    def _wait_for_response(self, cmd: int, timeout: float = 0.1):
+    def _wait_for_response(self, cmd: int, timeout: float = 0.01):
         end_time = time.time() + timeout
         while time.time() < end_time:
             packet = self._read_available()
@@ -121,6 +122,8 @@ class HexapodSerial:
                 return packet
             elif packet:
                 logger.info(f"Received unknown packet {packet.cmd}, wanted {cmd}")
+            elif self.conn and self.conn.in_waiting == 0:
+                time.sleep(0.0001)  # Avoid busy-spin when no data
         logger.error(f"Did not receive a servo command response after {timeout}s")
 
     def _read_available(self) -> SerialPacket | None:
@@ -128,17 +131,20 @@ class HexapodSerial:
         if not self.conn or not self.serial_buffer:
             return
 
-        while True:
-            if self.conn.in_waiting == 0:
-                return
-            byte = self.conn.read(1)
-            packet = self.serial_buffer.feed(byte[0])
+        # Read all available bytes at once (avoids N syscalls for N-byte response)
+        n = self.conn.in_waiting
+        if n == 0:
+            return
+        chunk = self.conn.read(n)
+
+        for byte in chunk:
+            packet = self.serial_buffer.feed(byte)
             if packet and packet.cmd == CMD_MESSAGE:
                 logger.info("Message from Servo2040: %s", packet.data.decode("utf-8"))
-                return
-
+                continue  # Drain; may have CMD_RESPONSE next
             if packet:
                 return packet
+        return None
 
     def _connect_to_port(self, port: str):
         """
@@ -156,7 +162,6 @@ class HexapodSerial:
             serial.SerialException: If the connection is not established within the timeout period.
         """
         self.conn = serial.Serial(port, 115200, timeout=0.5)
-        logger.info(f"Scanning {port}...")
         self.serial_buffer = SerialBuffer()
 
         logger.debug(f"Sending PING to {port}")

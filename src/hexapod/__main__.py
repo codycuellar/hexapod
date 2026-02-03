@@ -7,6 +7,7 @@ It handles gamepad input, motion planning, and serial communication with the Ser
 
 import argparse
 import logging
+import sys
 import time
 
 from hexapod.engine import Frame, Vec3d, Vec2d, Rotation
@@ -105,7 +106,36 @@ def _parse_args() -> argparse.Namespace:
         default="INFO",
         help="Logging level (default INFO).",
     )
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="Enable loop profiling. Outputs timing to stderr (separate from logging). Use --loglevel ERROR to avoid logging overhead affecting results.",
+    )
+    parser.add_argument(
+        "--profile-interval",
+        type=int,
+        default=60,
+        metavar="N",
+        help="Print profile summary every N frames when --profile (default 60).",
+    )
     return parser.parse_args()
+
+
+def _print_profile(accum: dict[str, list[float]], budget_ms: float) -> None:
+    """Print profile summary to stderr. Uses print() not logging to avoid affecting timings."""
+    total = 0.0
+    lines: list[str] = []
+    for name in ("gamepad", "motion_planner", "serial", "sleep_overrun"):
+        vals = accum.get(name, [])
+        if vals:
+            avg = sum(vals) / len(vals)
+            total += avg
+            lines.append(f"  {name}: avg={avg:.2f} ms (n={len(vals)})")
+    if lines:
+        print("[profile] ---", file=sys.stderr)
+        print("\n".join(lines), file=sys.stderr)
+        print(f"  total: {total:.2f} ms  budget: {budget_ms:.2f} ms", file=sys.stderr)
+        print("[profile] ---", file=sys.stderr)
 
 
 def main() -> None:
@@ -133,18 +163,34 @@ def main() -> None:
     hp_serial: HexapodSerial | None = None
     if not args.disable_servos:
         hp_serial = HexapodSerial(connect_timeout=10)
-        hp_serial.connect()
+        if not hp_serial.connect():
+            logger.info("Hexapod not connected; loop will retry every 5s")
     else:
         logger.info("Servos disabled (--disable-servos)")
 
     prev_time = time.perf_counter()
+    last_overrun_log = 0.0  # Rate-limit overrun warnings
+    last_reconnect_attempt = 0.0  # Cooldown to avoid blocking loop on connect()
+
+    # Profiling state (only used when --profile; avoids overhead when disabled)
+    profile = getattr(args, "profile", False)
+    profile_interval = getattr(args, "profile_interval", 60)
+    profile_accum: dict[str, list[float]] = {}
+    frame_count = 0
 
     logger.info("Starting control loop...")
+    if profile:
+        print("[profile] enabled, output every", profile_interval, "frames", file=sys.stderr)
 
     try:
         while running:
             if hp_serial is not None and not hp_serial.conn:
-                hp_serial.connect()
+                now_ = time.perf_counter()
+                if now_ - last_reconnect_attempt >= 5.0:
+                    last_reconnect_attempt = now_
+                    hp_serial.connect()
+
+            t0 = time.perf_counter() if profile else 0.0
 
             gait_vec = Vec2d()
             gait_turn = 0.0
@@ -154,20 +200,20 @@ def main() -> None:
 
             # LEFT STICK
             _, bumper_l_held = gamepad.get_bumper_l()
+            joy_l = gamepad.get_joy_l()
+            joy_r = gamepad.get_joy_r()
             if bumper_l_held:
-                body_offset_trans = gamepad.get_joy_l().to_3d()
+                body_offset_trans = joy_l.to_3d()
             else:
-                gait_vec = gamepad.get_joy_l()
+                gait_vec = joy_l
 
             # RIGHT STICK
             if bumper_l_held:
                 body_offset_trans = Vec3d(
-                    body_offset_trans.x, body_offset_trans.y, gamepad.get_joy_r().y
+                    body_offset_trans.x, body_offset_trans.y, joy_r.y
                 )
             else:
-                body_offset_rot = Vec3d(
-                    -gamepad.get_joy_r().y, gamepad.get_joy_r().x, body_offset_rot.z
-                )
+                body_offset_rot = Vec3d(-joy_r.y, joy_r.x, body_offset_rot.z)
 
             # TRIGGERS
             trigger_turn = gamepad.get_trigger_l() - gamepad.get_trigger_r()
@@ -179,10 +225,18 @@ def main() -> None:
             else:
                 gait_turn = trigger_turn
 
+            if profile:
+                t1 = time.perf_counter()
+                profile_accum.setdefault("gamepad", []).append((t1 - t0) * 1000)
+
             # Update motion planner
             motion_planner.update_gait(DT, gait_vec, gait_turn)
             motion_planner.offset_body(DT, body_offset_trans, body_offset_rot)
             motion_planner.step(DT)
+
+            if profile:
+                t2 = time.perf_counter()
+                profile_accum.setdefault("motion_planner", []).append((t2 - t1) * 1000)
 
             if hp_serial is not None:
                 servo_data = body.get_servo_angles()
@@ -191,16 +245,34 @@ def main() -> None:
                 except CommandError as e:
                     logger.error("Command failed: %s", e)
 
+            if profile:
+                t3 = time.perf_counter()
+                if hp_serial is not None:
+                    profile_accum.setdefault("serial", []).append((t3 - t2) * 1000)
+
             now = time.perf_counter()
             time_left = prev_time + DT - now
             if time_left > 0:
                 time.sleep(time_left)
             else:
-                logger.warning(
-                    "Frame overran by %.4f ms (budget %.4f ms)",
-                    -time_left * 1000,
-                    DT * 1000,
-                )
+                # Rate-limit overrun warnings to avoid log I/O bottleneck
+                if now - last_overrun_log >= 0.5:
+                    logger.warning(
+                        "Frame overran by %.4f ms (budget %.4f ms)",
+                        -time_left * 1000,
+                        DT * 1000,
+                    )
+                    last_overrun_log = now
+
+            if profile:
+                t4 = time.perf_counter()
+                profile_accum.setdefault("sleep_overrun", []).append((t4 - t3) * 1000)
+                frame_count += 1
+                if frame_count >= profile_interval:
+                    _print_profile(profile_accum, DT * 1000)
+                    profile_accum.clear()
+                    frame_count = 0
+
             prev_time = time.perf_counter()
 
     except KeyboardInterrupt:
