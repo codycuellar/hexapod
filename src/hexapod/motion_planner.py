@@ -9,6 +9,7 @@ The controller's job is to:
 """
 
 import math
+import time
 from enum import Enum, auto
 from dataclasses import dataclass
 
@@ -121,26 +122,30 @@ class TripodGait:
         if gait_vector.length() > 0.0 or rotation_velocity != 0.0:
             self.time_resting = 0.0
 
-    def step(self, dt: float):
+    def step(self, dt: float) -> list[tuple[str, float]]:
         mag = self.input_vector.length()
 
         if self.state == GaitState.STANDING:
             if mag > 0.0 or self.rotation_input_velocity != 0.0:
                 self.state = GaitState.WALKING
                 self._queue_swing(self.stride_groups[0])
+                return [("queue_swing", time.perf_counter())]
 
         elif self.state == GaitState.WALKING:
-            # we're not receiving inputs
+            timers: list[tuple[str, float]] = []
             if self.leg_swinging:
                 self._perform_swing(dt)
+                timers.append(("perform_swing", time.perf_counter()))
 
             if mag > 0.0:
                 self._perform_stride(dt)
+                timers.append(("perform_stride", time.perf_counter()))
             else:
                 self.ground_transform.translation = Vec3d()
 
             if self.rotation_input_velocity != 0.0:
                 self._perform_rotation(dt)
+                timers.append(("perform_rotation", time.perf_counter()))
             else:
                 self.ground_transform.rotation = Rotation.identity()
 
@@ -150,6 +155,11 @@ class TripodGait:
                 and self.rotation_input_velocity == 0.0
             ):
                 self._queue_rest_position(dt)
+                timers.append(("queue_rest", time.perf_counter()))
+
+            return timers
+
+        return []  # we shouldn't get here
 
     def _perform_stride(self, dt: float):
         gait_dir = self.input_vector.normalize()
@@ -463,9 +473,10 @@ class MotionPlanner:
         self.body_pos_offset_fixed += offset * self.pos_offset_roc
         self.body_rot_offset_fixed += rotation * self.rot_offset_roc
 
-    def step(self, dt: float):
-        self.gait.step(dt)
+    def step(self, dt: float) -> list[tuple[str, float]]:
+        timers = self.gait.step(dt)
         positions = self.gait.get_foot_global_positions()
+        timers.append(("get_foot_positions", time.perf_counter()))
 
         self.body.frame.origin = self.body_pos_offset_fixed + (
             self.body_pos_input_offset.elementwise("mul", self.max_pos_offset)
@@ -478,7 +489,9 @@ class MotionPlanner:
         for id, pos in positions.items():
             self.body.set_foot_position(id, self.body.frame.world_pos_to_local(pos))
 
+        timers.append(("set_offset_positions", time.perf_counter()))
         self.ground_transform = self.gait.ground_transform
+        return timers
 
     def _get_next_initial_pos(self, state: GaitState):
         if state == GaitState.STANDING:

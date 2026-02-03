@@ -181,7 +181,12 @@ def main() -> None:
 
     logger.info("Starting control loop...")
     if profile:
-        print("[profile] enabled, output every", profile_interval, "frames", file=sys.stderr)
+        print(
+            "[profile] enabled, output every",
+            profile_interval,
+            "frames",
+            file=sys.stderr,
+        )
 
     try:
         while running:
@@ -234,13 +239,14 @@ def main() -> None:
             # Update motion planner
             motion_planner.update_gait(DT, gait_vec, gait_turn)
             motion_planner.offset_body(DT, body_offset_trans, body_offset_rot)
-            motion_planner.step(DT)
+            motion_profiles = motion_planner.step(DT)
 
             if profile:
-                t = time.perf_counter()
-                profile_accum.setdefault("motion_planner", []).append((t - pt) * 1000)
-                pt = t
+                for p in motion_profiles:
+                    profile_accum.setdefault(p[0], []).append((p[1] - pt) * 1000)
+                    pt = p[1]
 
+            servo_data = None
             if hp_serial is not None:
                 servo_data = body.get_servo_angles()
 
@@ -249,12 +255,16 @@ def main() -> None:
                 profile_accum.setdefault("angles", []).append((t - pt) * 1000)
                 pt = t
 
-            if hp_serial is not None:
+            if hp_serial is not None and servo_data:
                 try:
                     calc_t, send_t = hp_serial.send_servos(servo_data)
                     if profile:
-                        profile_accum.setdefault("serial_calc", []).append((calc_t - pt) * 1000)
-                        profile_accum.setdefault("serial_send", []).append((send_t - calc_t) * 1000)
+                        profile_accum.setdefault("serial_calc", []).append(
+                            (calc_t - pt) * 1000
+                        )
+                        profile_accum.setdefault("serial_send", []).append(
+                            (send_t - calc_t) * 1000
+                        )
                         pt = send_t
                 except CommandError as e:
                     logger.error("Command failed: %s", e)

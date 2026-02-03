@@ -19,7 +19,7 @@ class CommandError(Exception):
 class HexapodSerial:
     def __init__(self, connect_timeout: float = 20.0):
         system = platform.system()
-        self.ports = []
+        self.ports: list[str] = []
         if system == "Windows":
             self.ports = [f"COM{i}" for i in range(3, 8)]
         else:
@@ -58,7 +58,8 @@ class HexapodSerial:
 
     def send_servos(self, servos: ServoAngles):
         if not self.conn:
-            return False
+            t = time.perf_counter()
+            return [t, t]
 
         new_servos: dict[int, float] = {}
         try:
