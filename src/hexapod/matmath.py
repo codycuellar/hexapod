@@ -10,7 +10,7 @@ class Vector:
 
     def __init__(self, data: list[float]):
         self._data = data
-        self._magnitude = math.sqrt(sum(data[i] ** 2 for i in range(len(data))))
+        self._magnitude: float | None = None
 
     def __add__(self, other: "Vector") -> "Vector":
         self._ensure_len_eq(other)
@@ -47,6 +47,10 @@ class Vector:
         return f"{self.__class__.__name__}({', '.join(vals)})"
 
     def length(self):
+        if self._magnitude is None:
+            self._magnitude = math.sqrt(
+                sum(self._data[i] ** 2 for i in range(len(self._data)))
+            )
         return self._magnitude
 
     def distance_to(self, other: "Vector") -> float:
@@ -83,8 +87,6 @@ class Matrix:
 
     def __init__(self, data: list[list[float]]):
         self.N = len(data)
-        if not all([len(row) == self.N for row in data]):
-            raise ValueError("Matrix must be square (NxN).")
         self._data = [row[:] for row in data]
 
     def __getitem__(self, key: tuple[int, int]):
@@ -172,3 +174,11 @@ class Matrix:
 
     def copy(self) -> "Matrix":
         return Matrix(self.to_list())
+
+    def validate(self):
+        """
+        Validates the shape of the matrix. This isn't in the ctor, so we don't
+        cause unnescessary overhead on safe hotpaths.
+        """
+        if not all([len(row) == self.N for row in self._data]):
+            raise ValueError("Matrix must be square (NxN).")

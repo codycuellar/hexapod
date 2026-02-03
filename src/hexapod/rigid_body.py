@@ -43,9 +43,7 @@ class Body:
         """
         start = time.perf_counter()
         leg = self.legs[leg_id]
-        leg_local_pos = leg.frame.world_pos_to_local(
-            self.frame.local_pos_to_world(position)
-        )
+        leg_local_pos = leg.frame.local_pos_to_frame(self.frame, position)
         t0 = time.perf_counter() - start
         ik_start = time.perf_counter()
 
@@ -157,6 +155,10 @@ class Leg:
         Returns:
             The raw angles of each frame.
         """
+        # This function is a bet overly terse and avoids using many helper
+        # classes and functions to try to optimize performance as best as
+        # possible. On the Pi, calculating IK takes a significant amount of
+        # the time.
         # The ground plane position (when observing from the top)
         xy_pos = position.to_2d()
 

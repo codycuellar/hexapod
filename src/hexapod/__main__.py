@@ -239,6 +239,9 @@ def main() -> None:
             # Update motion planner
             motion_planner.update_gait(DT, gait_vec, gait_turn)
             motion_planner.offset_body(DT, body_offset_trans, body_offset_rot)
+            t = time.perf_counter()
+            profile_accum.setdefault("motion_update", []).append((t - pt) * 1000)
+            pt = t
             motion_profiles = motion_planner.step(DT)
 
             if profile:
@@ -246,13 +249,14 @@ def main() -> None:
                     profile_accum.setdefault(p[0], []).append((p[1] - pt) * 1000)
                     pt = p[1]
 
+            angles_start = time.perf_counter()
             servo_data = None
             if hp_serial is not None:
                 servo_data = body.get_servo_angles()
 
             if profile:
                 t = time.perf_counter()
-                profile_accum.setdefault("angles", []).append((t - pt) * 1000)
+                profile_accum.setdefault("angles", []).append((t - angles_start) * 1000)
                 pt = t
 
             if hp_serial is not None and servo_data:
@@ -285,7 +289,7 @@ def main() -> None:
 
             if profile:
                 t = time.perf_counter()
-                profile_accum.setdefault("sleep_overrun", []).append((t - pt) * 1000)
+                profile_accum.setdefault("sleep", []).append((t - pt) * 1000)
                 frame_count += 1
                 if frame_count >= profile_interval:
                     _print_profile(profile_accum, DT * 1000)

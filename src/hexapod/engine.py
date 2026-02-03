@@ -69,11 +69,7 @@ class Vec2d(Vector):
 class Vec3d(Vector):
     def __init__(self, x: float = 0.0, y: float = 0.0, z: float = 0.0):
         super().__init__([x, y, z])
-        l = self.length()
-        if l == 0:
-            self._normalized = [0, 0, 0]
-        else:
-            self._normalized = [x / l, y / l, z / l]
+        self._normalized: list[float] | None = None
 
     def __add__(self, other: "Vec3d") -> "Vec3d":  # type: ignore
         return Vec3d(*super().__add__(other)._data)
@@ -121,13 +117,18 @@ class Vec3d(Vector):
         )
 
     def normalize(self) -> "Vec3d":
+        l = self.length()
+        if l == 0:
+            self._normalized = [0, 0, 0]
+        else:
+            self._normalized = [self._data[0] / l, self._data[1] / l, self._data[2] / l]
         return Vec3d(*self._normalized)
 
     def to_transform(self):
         return Transform.create(translation=self)
 
     def to_2d(self):
-        return Vec2d(self.x, self.y)
+        return Vec2d(self._data[0], self._data[1])
 
     def copy(self) -> "Vec3d":
         return Vec3d(*self._data)
@@ -162,7 +163,11 @@ class Rotation(Matrix):
         :param z: Rotation about the z axis in degrees.
         :return: The Rotation instance.
         """
-        return Rotation.radians(math.radians(x), math.radians(y), math.radians(z))
+        return Rotation.radians(
+            math.radians(x) if x else 0.0,
+            math.radians(y) if y else 0.0,
+            math.radians(z) if z else 0.0,
+        )
 
     @staticmethod
     def radians(x: float = 0.0, y: float = 0.0, z: float = 0.0) -> "Rotation":
@@ -173,9 +178,10 @@ class Rotation(Matrix):
         :param z_rad: Rotation about the z axis in radians.
         :return: The Rotation instance.
         """
-        cos_x, sin_x = math.cos(x), math.sin(x)
-        cos_y, sin_y = math.cos(y), math.sin(y)
-        cos_z, sin_z = math.cos(z), math.sin(z)
+        cos_x, sin_x = (math.cos(x), math.sin(x)) if x else (1.0, 0.0)
+        cos_y, sin_y = (math.cos(y), math.sin(y)) if y else (1.0, 0.0)
+        cos_z, sin_z = (math.cos(z), math.sin(z)) if z else (1.0, 0.0)
+
         return Rotation(
             [
                 [
@@ -435,10 +441,12 @@ class Frame:
     def as_transform(self):
         return self._transform
 
-    def _local_to_world_t(self):
+    def _local_to_world_t(self) -> Transform:
         if self._global_transform is None:
             if self.parent:
-                self._global_transform = self.parent._local_to_world_t() @ self._transform
+                self._global_transform = (
+                    self.parent._local_to_world_t() @ self._transform
+                )
             else:
                 self._global_transform = self._transform
         return self._global_transform

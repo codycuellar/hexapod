@@ -490,7 +490,9 @@ class MotionPlanner:
         transform = 0.0
         ik = 0.0
         for id, pos in positions.items():
-            _t0, _t1 = self.body.set_foot_position(id, self.body.frame.world_pos_to_local(pos))
+            _t0, _t1 = self.body.set_foot_position(
+                id, self.body.frame.world_pos_to_local(pos)
+            )
             transform += _t0
             ik += _t1
 
