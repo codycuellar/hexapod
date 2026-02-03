@@ -162,7 +162,7 @@ class HexapodSerial:
         logger.debug(f"Sending PING to {port}")
         self._send_frame(CMD_PING, bytearray())
 
-        timeout = 1.0
+        timeout = 10.0
         packet = self._wait_for_response(CMD_PONG, timeout)
         if packet and packet.cmd == CMD_PONG:
             logger.info(f"Connected to {port}")
