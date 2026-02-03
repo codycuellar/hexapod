@@ -5,23 +5,20 @@ This module provides the main control loop for the hexapod robot.
 It handles gamepad input, motion planning, and serial communication with the Servo2040.
 """
 
-import time
+import argparse
 import logging
+import time
 
 from hexapod.engine import Frame, Vec3d, Vec2d, Rotation
 from hexapod.gamepad import get_controller
+from hexapod.hexapod_serial import HexapodSerial, CommandError
 from hexapod.motion_planner import MotionPlanner
 from hexapod.rigid_body import Body, Leg, LegID, LegConfig
-from hexapod.hexapod_serial import HexapodSerial, CommandError
 from hexapod.servos import Servo
 
-FPS = 20
+DEFAULT_FPS = 20
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 
 
 def create_hexapod() -> Body:
@@ -87,9 +84,40 @@ def create_hexapod() -> Body:
     return Body(Frame(), legs)
 
 
-def main():
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Hexapod control loop: gamepad input, motion planning, servo output."
+    )
+    parser.add_argument(
+        "--fps",
+        type=float,
+        default=DEFAULT_FPS,
+        help=f"Target loop rate in Hz (default {DEFAULT_FPS}).",
+    )
+    parser.add_argument(
+        "--disable-servos",
+        action="store_true",
+        help="Run without connecting to servos (motion planner only).",
+    )
+    parser.add_argument(
+        "--loglevel",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+        help="Logging level (default INFO).",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
     """Main control loop for hexapod operation."""
+    args = _parse_args()
+    logging.basicConfig(
+        level=getattr(logging, args.loglevel),
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+
     running = True
+    DT = 1.0 / args.fps
 
     logger.info("Creating hexapod geometry...")
     body = create_hexapod()
@@ -99,22 +127,23 @@ def main():
     motion_planner.initialize()
 
     logger.info("Initializing gamepad...")
-    gamepad = get_controller()  # uses GAMEPAD env or "xbox"
+    gamepad = get_controller()
     gamepad.start_reading()
 
-    # Setup serial communication with Servo2040
-    hp_serial = HexapodSerial(connect_timeout=10)
-    hp_serial.connect()
+    hp_serial: HexapodSerial | None = None
+    if not args.disable_servos:
+        hp_serial = HexapodSerial(connect_timeout=10)
+        hp_serial.connect()
+    else:
+        logger.info("Servos disabled (--disable-servos)")
 
-    DT = 1 / FPS
     prev_time = time.perf_counter()
 
     logger.info("Starting control loop...")
 
     try:
         while running:
-            # Check for connection
-            if not hp_serial.conn:
+            if hp_serial is not None and not hp_serial.conn:
                 hp_serial.connect()
 
             gait_vec = Vec2d()
@@ -155,13 +184,12 @@ def main():
             motion_planner.offset_body(DT, body_offset_trans, body_offset_rot)
             motion_planner.step(DT)
 
-            # Send servo commands to hardware
-            servo_data = body.get_servo_angles()
-            try:
-                hp_serial.send_servos(servo_data)
-            except CommandError as e:
-                logger.error(f"Command failed: {e}")
-                # Could trigger reconnect or other error handling here
+            if hp_serial is not None:
+                servo_data = body.get_servo_angles()
+                try:
+                    hp_serial.send_servos(servo_data)
+                except CommandError as e:
+                    logger.error("Command failed: %s", e)
 
             now = time.perf_counter()
             time_left = prev_time + DT - now
@@ -180,7 +208,8 @@ def main():
     finally:
         logger.info("Shutting down...")
         gamepad.stop_reading()
-        hp_serial.close()
+        if hp_serial is not None:
+            hp_serial.close()
         logger.info("Shutdown complete")
 
 
