@@ -24,9 +24,9 @@ def main():
 
     log_to_file(LogLevel.INFO, "Initializing LEDs")
     receive_data_led_timeout = 1000 # ms
-    led_idle_time = 1000 * 60
+    led_idle_time = 1000 * 10
     LED_RUNNING = (0, LEDSolid(LEDColor("blue", 1.0, 0.25)))
-    LED_IDLE = (0, LEDSolid(LEDColor("yellow", 1.0, 0.2)))
+    LED_IDLE = (0, LEDSolid(LEDColor("orange", 1.0, 0.2)))
     LED_RCV_DATA = (1, LEDBlink(LEDColor("green", 1.0, 0.2), 0.3))
     LED_NO_DATA = (1, LEDOff())
     LED_ERROR = (2, LEDPulse(LEDColor("red", 1.0, 1.0), 3.0))
@@ -40,7 +40,7 @@ def main():
 
     last_rx = utime.ticks_ms()
 
-    led_manager.set_effect(*LED_RUNNING)
+    led_manager.set_effect(*LED_IDLE)
     log_to_file(LogLevel.INFO, "Entering main loop")
 
     short_idle = True
@@ -61,11 +61,11 @@ def main():
                     try:
                         packet = serial_buffer.feed(byte)
                         if packet:
-                            short_idle = False
-                            long_idle = False
                             last_rx = now
+                            long_idle = False
+                            short_idle = False
+                            led_manager.set_effect(*LED_RUNNING)
                             led_manager.set_effect(*LED_RCV_DATA)
-
                             success = cmd_processor.dispatch(packet)
                             if not success:
                                 led_manager.set_effect(*LED_ERROR)
