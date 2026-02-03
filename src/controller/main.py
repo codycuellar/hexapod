@@ -52,13 +52,12 @@ def main():
             led_manager.step(now)
 
             if spoll.poll(0):
-                while True:  # read all availble bytes
-                    byte_data = usys.stdin.buffer.read(1)
-                    if not byte_data or len(byte_data) == 0:
-                        break
-                    byte = byte_data[0]
-
-                    try:
+                try:
+                    line = usys.stdin.buffer.readline()
+                    if not line:
+                        continue
+                    line = line.rstrip(b"\n\r")
+                    for byte in line:
                         packet = serial_buffer.feed(byte)
                         if packet:
                             last_rx = now
@@ -70,10 +69,9 @@ def main():
                             if not success:
                                 led_manager.set_effect(*LED_ERROR)
                             break
-                    except Exception as e:
-                        led_manager.set_effect(*LED_ERROR)
-                        log_to_file(LogLevel.WARN, e)
-                        break
+                except Exception as e:
+                    led_manager.set_effect(*LED_ERROR)
+                    log_to_file(LogLevel.WARN, e)
 
             # Update LED status based on time since last RX
             diff = utime.ticks_diff(now, last_rx)

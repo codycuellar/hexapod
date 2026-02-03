@@ -96,11 +96,11 @@ class HexapodSerial:
             return t, t
 
     def _send_frame(self, cmd: int, data: bytearray):
-        """Send ASCII protocol frame."""
+        """Send ASCII protocol frame (newline-terminated for Pico readline())."""
         if not self.conn:
             return
-        frame = SerialBuffer.build_frame(cmd, data)
-        logger.debug("writing frame: %s", frame.decode("ASCII"))
+        frame = SerialBuffer.build_frame(cmd, data) + b"\n"
+        logger.debug("writing frame: %s", frame.decode("ASCII").strip())
         self.conn.write(frame)
         self.conn.flush()
 
