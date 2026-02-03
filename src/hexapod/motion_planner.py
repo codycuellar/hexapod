@@ -476,7 +476,8 @@ class MotionPlanner:
     def step(self, dt: float) -> list[tuple[str, float]]:
         timers = self.gait.step(dt)
         positions = self.gait.get_foot_global_positions()
-        timers.append(("get_foot_positions", time.perf_counter()))
+        t0 = time.perf_counter()
+        timers.append(("get_foot_positions", t0))
 
         self.body.frame.origin = self.body_pos_offset_fixed + (
             self.body_pos_input_offset.elementwise("mul", self.max_pos_offset)
@@ -486,10 +487,18 @@ class MotionPlanner:
             + self.body_rot_input_offset.elementwise("mul", self.max_rot_offset)
         )
 
+        transform = 0.0
+        ik = 0.0
         for id, pos in positions.items():
-            self.body.set_foot_position(id, self.body.frame.world_pos_to_local(pos))
+            _t0, _t1 = self.body.set_foot_position(id, self.body.frame.world_pos_to_local(pos))
+            transform += _t0
+            ik += _t1
 
-        timers.append(("set_offset_positions", time.perf_counter()))
+        transform = t0 + transform
+        timers.append(("leg_transform", transform))
+        timers.append(("leg_ik", transform + ik))
+
+        # timers.append(("set_offset_positions", time.perf_counter()))
         self.ground_transform = self.gait.ground_transform
         return timers
 

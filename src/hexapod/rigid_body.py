@@ -1,5 +1,6 @@
 import math
 import logging
+import time
 from dataclasses import dataclass
 
 from hexapod.servos import JointControl, ServoAngles
@@ -40,11 +41,16 @@ class Body:
         """
         Set foot position for a specific leg in body-relative coordinates.
         """
+        start = time.perf_counter()
         leg = self.legs[leg_id]
         leg_local_pos = leg.frame.world_pos_to_local(
             self.frame.local_pos_to_world(position)
         )
+        t0 = time.perf_counter() - start
+        ik_start = time.perf_counter()
+
         leg.set_foot_pos(leg_local_pos)
+        return [t0, time.perf_counter() - ik_start]
 
     def get_foot_position(self, leg_id: LegID) -> Vec3d:
         """

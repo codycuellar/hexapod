@@ -435,16 +435,13 @@ class Frame:
     def as_transform(self):
         return self._transform
 
-    def _local_to_world_t(self) -> Transform:
-        transform: Transform
-        if not self._global_transform:
+    def _local_to_world_t(self):
+        if self._global_transform is None:
             if self.parent:
-                transform = self.parent._local_to_world_t() @ self._transform
+                self._global_transform = self.parent._local_to_world_t() @ self._transform
             else:
-                transform = self._transform
-            return transform
-        else:
-            return self._global_transform
+                self._global_transform = self._transform
+        return self._global_transform
 
     def _set_dirty(self):
         if self._global_transform:
