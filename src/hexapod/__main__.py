@@ -9,6 +9,7 @@ import argparse
 import logging
 import sys
 import time
+from collections import OrderedDict
 
 from hexapod.engine import Frame, Vec3d, Vec2d, Rotation
 from hexapod.gamepad import get_controller
@@ -125,12 +126,12 @@ def _print_profile(accum: dict[str, list[float]], budget_ms: float) -> None:
     """Print profile summary to stderr. Uses print() not logging to avoid affecting timings."""
     total = 0.0
     lines: list[str] = []
-    for name in ("gamepad", "motion_planner", "serial", "sleep_overrun"):
+    for name in accum.keys():
         vals = accum.get(name, [])
         if vals:
             avg = sum(vals) / len(vals)
             total += avg
-            lines.append(f"  {name}: avg={avg:.2f} ms (n={len(vals)})")
+            lines.append(f"  {name}: avg={avg:.2f}ms max={max(vals):.2f}")
     if lines:
         print("[profile] ---", file=sys.stderr)
         print("\n".join(lines), file=sys.stderr)
@@ -175,7 +176,7 @@ def main() -> None:
     # Profiling state (only used when --profile; avoids overhead when disabled)
     profile = getattr(args, "profile", False)
     profile_interval = getattr(args, "profile_interval", 60)
-    profile_accum: dict[str, list[float]] = {}
+    profile_accum: OrderedDict[str, list[float]] = OrderedDict()
     frame_count = 0
 
     logger.info("Starting control loop...")
@@ -190,7 +191,7 @@ def main() -> None:
                     last_reconnect_attempt = now_
                     hp_serial.connect()
 
-            t0 = time.perf_counter() if profile else 0.0
+            pt = time.perf_counter() if profile else 0.0
 
             gait_vec = Vec2d()
             gait_turn = 0.0
@@ -226,8 +227,9 @@ def main() -> None:
                 gait_turn = trigger_turn
 
             if profile:
-                t1 = time.perf_counter()
-                profile_accum.setdefault("gamepad", []).append((t1 - t0) * 1000)
+                t = time.perf_counter()
+                profile_accum.setdefault("gamepad", []).append((t - pt) * 1000)
+                pt = t
 
             # Update motion planner
             motion_planner.update_gait(DT, gait_vec, gait_turn)
@@ -235,20 +237,27 @@ def main() -> None:
             motion_planner.step(DT)
 
             if profile:
-                t2 = time.perf_counter()
-                profile_accum.setdefault("motion_planner", []).append((t2 - t1) * 1000)
+                t = time.perf_counter()
+                profile_accum.setdefault("motion_planner", []).append((t - pt) * 1000)
+                pt = t
 
             if hp_serial is not None:
                 servo_data = body.get_servo_angles()
-                try:
-                    hp_serial.send_servos(servo_data)
-                except CommandError as e:
-                    logger.error("Command failed: %s", e)
 
             if profile:
-                t3 = time.perf_counter()
-                if hp_serial is not None:
-                    profile_accum.setdefault("serial", []).append((t3 - t2) * 1000)
+                t = time.perf_counter()
+                profile_accum.setdefault("angles", []).append((t - pt) * 1000)
+                pt = t
+
+            if hp_serial is not None:
+                try:
+                    calc_t, send_t = hp_serial.send_servos(servo_data)
+                    if profile:
+                        profile_accum.setdefault("serial_calc", []).append((calc_t - pt) * 1000)
+                        profile_accum.setdefault("serial_send", []).append((send_t - calc_t) * 1000)
+                        pt = send_t
+                except CommandError as e:
+                    logger.error("Command failed: %s", e)
 
             now = time.perf_counter()
             time_left = prev_time + DT - now
@@ -265,8 +274,8 @@ def main() -> None:
                     last_overrun_log = now
 
             if profile:
-                t4 = time.perf_counter()
-                profile_accum.setdefault("sleep_overrun", []).append((t4 - t3) * 1000)
+                t = time.perf_counter()
+                profile_accum.setdefault("sleep_overrun", []).append((t - pt) * 1000)
                 frame_count += 1
                 if frame_count >= profile_interval:
                     _print_profile(profile_accum, DT * 1000)

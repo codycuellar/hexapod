@@ -19,10 +19,13 @@ class CommandError(Exception):
 class HexapodSerial:
     def __init__(self, connect_timeout: float = 20.0):
         system = platform.system()
+        self.ports = []
         if system == "Windows":
             self.ports = [f"COM{i}" for i in range(3, 8)]
         else:
-            self.ports = ["/dev/ttyACM0", "/dev/ttyUSB0", "/dev/ttyUSB1"]
+            for i in range(4):
+                self.ports.append(f"/dev/ttyACM{i}")
+                self.ports.append(f"/dev/ttyUSB{i}")
         self.timeout = connect_timeout
         self.conn = None
         self.serial_buffer = None
@@ -76,27 +79,21 @@ class HexapodSerial:
 
             # do nothing if we have no new servos to update
             num_servos_to_update = len(new_servos.keys())
+            calc_t = time.perf_counter()
             if num_servos_to_update == 0:
-                return True
+                return calc_t, calc_t
 
             logger.debug("Servos to update: %s", new_servos)
 
             # add the count of servos we're sending
             data_bytes.insert(0, num_servos_to_update)
-            t0 = time.perf_counter()
             self._send_frame(CMD_SET_SERVO, data_bytes)
-            write_ms = (time.perf_counter() - t0) * 1000
-            if write_ms > 5.0:
-                frame_bytes = 2 + 4 + 2 * len(data_bytes)  # ! CMD, 4-char LEN, hex DATA
-                logger.debug(
-                    "serial.write took %.1f ms (%d bytes)", write_ms, frame_bytes
-                )
-
-            return True
+            return calc_t, time.perf_counter()
         except (serial.SerialException, OSError) as e:
             logger.error(f"Write error: {e}")
             self.close()
-            return False
+            t = time.perf_counter()
+            return t, t
 
     def _send_frame(self, cmd: int, data: bytearray):
         """Send ASCII protocol frame."""
@@ -154,7 +151,7 @@ class HexapodSerial:
         Raises:
             serial.SerialException: If the connection is not established within the timeout period.
         """
-        self.conn = serial.Serial(port, 115200, timeout=0.5)
+        self.conn = serial.Serial(port, 1000000, timeout=0.5)
         self.serial_buffer = SerialBuffer()
 
         logger.debug(f"Sending PING to {port}")
