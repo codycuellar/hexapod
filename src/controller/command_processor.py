@@ -29,7 +29,6 @@ class CommandProcessor:
                 for pin, angle in servos:
                     self.servo_cluster.value(pin, float(angle))
 
-                self._send_frame(CMD_RESPONSE, bytes([ACK]))
                 return True
 
             else:

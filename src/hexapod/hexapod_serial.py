@@ -92,14 +92,7 @@ class HexapodSerial:
                     "serial.write took %.1f ms (%d bytes)", write_ms, frame_bytes
                 )
 
-            # Check for ACK/NACK response
-            packet = self._wait_for_response(CMD_RESPONSE)
-            if packet:
-                if packet.data[0] == NACK:
-                    raise CommandError("Servo command rejected by device (NACK)")
-                return True
-            else:
-                return False
+            return True
         except (serial.SerialException, OSError) as e:
             logger.error(f"Write error: {e}")
             self.close()
