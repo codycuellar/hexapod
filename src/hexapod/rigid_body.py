@@ -43,7 +43,7 @@ class Body:
         """
         start = time.perf_counter()
         leg = self.legs[leg_id]
-        leg_local_pos = leg.frame.local_pos_to_frame(self.frame, position)
+        leg_local_pos = self.frame.local_pos_to_frame(leg.frame, position)
         t0 = time.perf_counter() - start
         ik_start = time.perf_counter()
 

@@ -34,7 +34,7 @@ def create_hexapod() -> Body:
     TIB_LEN = 90.0
 
     origin_frame = Frame()
-    distance = Vec3d(100, 0, 0)
+    distance = Vec3d(163, 0, 0)
 
     ids = [LegID.RM, LegID.RF, LegID.LF, LegID.LM, LegID.LB, LegID.RB]
     servos = {
