@@ -38,35 +38,35 @@ def create_hexapod() -> Body:
 
     ids = [LegID.RM, LegID.RF, LegID.LF, LegID.LM, LegID.LB, LegID.RB]
     servos = {
-        LegID.RM: (
-            Servo(6, -7.0, inverted=True),
-            Servo(7, -30.0, inverted=False),
-            Servo(8, 65.0, inverted=True),
-        ),
-        LegID.RF: (
-            Servo(3, -6.0, inverted=True),
-            Servo(4, -30.0, inverted=False),
-            Servo(5, 67.0, inverted=True),
-        ),
         LegID.LF: (
-            Servo(0, 2.0, inverted=True),
-            Servo(1, 24.0, inverted=True),
-            Servo(2, -80.0, inverted=False),
+            Servo(9, -2.0, inverted=True),
+            Servo(10, -26.0, inverted=False),
+            Servo(11, 78.0, inverted=True),
         ),
         LegID.LM: (
-            Servo(15, -4.0, inverted=True),
-            Servo(16, 27.0, inverted=True),
-            Servo(17, -85.0, inverted=False),
+            Servo(12, -7.0, inverted=True),
+            Servo(13, -29.0, inverted=False),
+            Servo(14, 67.0, inverted=True),
         ),
         LegID.LB: (
-            Servo(12, -4.0, inverted=True),
-            Servo(13, 31.0, inverted=True),
-            Servo(14, -77.0, inverted=False),
+            Servo(15, -6.0, inverted=True),
+            Servo(16, -32.0, inverted=False),
+            Servo(17, 65.0, inverted=True),
+        ),
+        LegID.RF: (
+            Servo(7, -5.0, inverted=True),
+            Servo(6, 30.0, inverted=True),
+            Servo(8, -78.0, inverted=False),
+        ),
+        LegID.RM: (
+            Servo(3, 2.0, inverted=True),
+            Servo(4, 24.0, inverted=True),
+            Servo(5, -80.0, inverted=False),
         ),
         LegID.RB: (
-            Servo(9, 0.0, inverted=True),
-            Servo(10, -26.0, inverted=False),
-            Servo(11, 73.0, inverted=True),
+            Servo(0, -3.0, inverted=True),
+            Servo(1, 28.0, inverted=True),
+            Servo(2, -83.0, inverted=False),
         ),
     }
 
